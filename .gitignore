@@ -1,0 +1,44 @@
+# Environment & Secrets (NEVER COMMIT)
+.env
+.env.*
+backend/.env
+*.env
+
+# SQLite Databases & Local Data
+backend/data/*.db
+backend/data/*.sqlite
+backend/data/*.sqlite3
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.npm
+.vite/
+
+# Temporary files & Scratch scripts
+scratch/
+.tempmediaStorage/
+*.log
+
+# IDE & OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
