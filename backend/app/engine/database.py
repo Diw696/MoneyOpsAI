@@ -102,17 +102,27 @@ def init_db():
         incident_id VARCHAR(100) PRIMARY KEY,
         title VARCHAR(255) NOT NULL,
         type VARCHAR(100) NOT NULL,
+        target_entity_type VARCHAR(50) DEFAULT 'gateway',
+        target_entity_id VARCHAR(100),
         severity VARCHAR(50) NOT NULL,
         status VARCHAR(50) DEFAULT 'open',
         affected_merchants INTEGER DEFAULT 1,
         affected_payments INTEGER DEFAULT 1,
         potential_exposure DOUBLE PRECISION NOT NULL,
         anomaly_score DOUBLE PRECISION DEFAULT 0.85,
+        primary_signal TEXT,
+        evidence_json TEXT,
         source VARCHAR(50) DEFAULT 'razorpay_test',
         detected_at TIMESTAMPTZ NOT NULL,
         description TEXT NOT NULL
     );
     """)
+
+    # Alter table if existing from earlier migration to guarantee new columns exist
+    cursor.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS target_entity_type VARCHAR(50) DEFAULT 'gateway';")
+    cursor.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS target_entity_id VARCHAR(100);")
+    cursor.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS primary_signal TEXT;")
+    cursor.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS evidence_json TEXT;")
 
     # 7. AI Investigations Table
     cursor.execute("""
@@ -168,10 +178,12 @@ def init_db():
     # Indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_payments_merchant ON payments(merchant_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_payments_gateway ON payments(gateway);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_payments_source ON payments(source);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_refunds_payment ON refunds(payment_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_webhooks_external_id ON webhook_events(external_event_id);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_steps_investigation ON ai_investigation_steps(investigation_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_incidents_entity ON incidents(target_entity_type, target_entity_id);")
 
     conn.commit()
     cursor.close()

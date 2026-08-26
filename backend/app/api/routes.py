@@ -8,6 +8,7 @@ from app.engine.database import get_db_connection
 from app.engine.pipeline import CanonicalEvent, IngestionPipeline
 from app.engine.webhook_service import webhook_service
 from app.engine.incident_lab import IncidentLabGenerator
+from app.engine.anomaly_detector import anomaly_detector
 from app.integrations.razorpay.client import razorpay_client
 from app.integrations.razorpay.mapper import RazorpayMapper
 from app.integrations.razorpay.exceptions import RazorpayAuthError
@@ -214,6 +215,22 @@ def generate_incident_lab_data(req: GenerateLabRequest):
         raise HTTPException(status_code=500, detail=f"Incident Lab generation failed: {str(e)}")
 
 # =============================================================================
+# ML ANOMALY DETECTION (PHASE B)
+# =============================================================================
+
+@router.post("/anomalies/detect")
+def trigger_anomaly_detection():
+    """
+    Triggers IsolationForest unsupervised anomaly detection on PostgreSQL features.
+    Creates or updates detected incidents in PostgreSQL.
+    """
+    try:
+        result = anomaly_detector.run_detection()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Anomaly detection failed: {str(e)}")
+
+# =============================================================================
 # DATA ENTITY QUERY ENDPOINTS (POSTGRESQL)
 # =============================================================================
 
@@ -272,11 +289,42 @@ def list_webhooks(limit: int = 50):
 
 @router.get("/incidents")
 def list_incidents():
-    """Retrieves active incidents from PostgreSQL."""
+    """Retrieves all active and historical incidents from PostgreSQL."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM incidents ORDER BY detected_at DESC;")
     rows = cursor.fetchall()
     cursor.close()
     conn.close()
-    return [dict(r) for r in rows]
+    
+    results = []
+    for r in rows:
+        d = dict(r)
+        if d.get("evidence_json"):
+            try:
+                d["evidence"] = json.loads(d["evidence_json"])
+            except Exception:
+                d["evidence"] = None
+        results.append(d)
+    return results
+
+@router.get("/incidents/{incident_id}")
+def get_incident(incident_id: str):
+    """Retrieves a single incident by ID from PostgreSQL."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM incidents WHERE incident_id = %s;", (incident_id,))
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
+    
+    d = dict(row)
+    if d.get("evidence_json"):
+        try:
+            d["evidence"] = json.loads(d["evidence_json"])
+        except Exception:
+            d["evidence"] = None
+    return d

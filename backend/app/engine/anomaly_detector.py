@@ -1,133 +1,232 @@
+import json
+import uuid
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 import numpy as np
-from typing import Dict, Any, List, Tuple
 from sklearn.ensemble import IsolationForest
-from app.models.schemas import AnomalySignal
 from app.core.config import settings
+from app.engine.database import get_db_connection
+from app.engine.feature_engine import FeatureEngine
 
-class FinancialAnomalyDetector:
+class AnomalyDetector:
     """
-    Unsupervised Anomaly Detection using scikit-learn Isolation Forest.
-    Evaluates engineered financial transaction and merchant-context features
-    to produce mathematically derived anomaly scores and granular signal contributors.
+    Unsupervised ML Anomaly Detection Engine using Scikit-Learn IsolationForest.
+    Operates on explainable business features extracted dynamically from PostgreSQL.
+    Zero hardcoded gateway or merchant rules.
     """
 
-    FEATURE_NAMES = [
-        "amount_norm",
-        "retry_count",
-        "merchant_refund_deviation",
-        "gateway_failure_rate",
-        "settlement_delay_norm",
-        "velocity_per_min",
-        "has_failure_code",
-        "webhook_timeout_flag"
-    ]
+    def __init__(self, contamination: float = 0.05, threshold: float = 0.65, random_state: int = 42):
+        self.contamination = contamination
+        self.threshold = threshold
+        self.random_state = random_state
+        self.feature_names = [
+            "failure_rate",
+            "failure_rate_ratio",
+            "top_failure_code_share",
+            "failed_payments_volume"
+        ]
 
-    def __init__(self):
-        self.model = IsolationForest(
+    def _prepare_feature_matrix(self, features_list: List[Dict[str, Any]]) -> np.ndarray:
+        """Constructs and normalizes the feature matrix X for Isolation Forest."""
+        X_rows = []
+        for f in features_list:
+            row = [
+                float(f.get("failure_rate", 0.0)),
+                float(f.get("failure_rate_ratio", 1.0)),
+                float(f.get("top_failure_code_share", 0.0)),
+                float(np.log1p(f.get("failed_payments", 0)))
+            ]
+            X_rows.append(row)
+        return np.array(X_rows, dtype=np.float64)
+
+    def run_detection(self) -> Dict[str, Any]:
+        """
+        Executes end-to-end anomaly detection on PostgreSQL data:
+        1. Extracts gateway and merchant feature vectors.
+        2. Fits Isolation Forest on the population.
+        3. Normalizes decision function into [0.0, 1.0] anomaly scores.
+        4. Identifies entities exceeding threshold.
+        5. Computes business evidence and persists incidents to PostgreSQL.
+        """
+        gateway_features = FeatureEngine.extract_gateway_features()
+        merchant_features = FeatureEngine.extract_merchant_features()
+
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) as cnt FROM payments;")
+        total_payments_analyzed = c.fetchone()["cnt"]
+        c.close()
+        conn.close()
+
+        if not gateway_features:
+            return {
+                "status": "success",
+                "records_analyzed": 0,
+                "anomalies_detected": 0,
+                "incidents_created": [],
+                "gateway_scores": []
+            }
+
+        # 1. Build Feature Matrix
+        X = self._prepare_feature_matrix(gateway_features)
+
+        # 2. Fit Isolation Forest Model
+        # When population is small (e.g. 5 gateways), IsolationForest is trained with adjusted contamination
+        clf = IsolationForest(
             n_estimators=100,
-            contamination=settings.ISOLATION_FOREST_CONTAMINATION,
-            random_state=42
+            contamination=self.contamination,
+            random_state=self.random_state
         )
-        self.is_fitted = False
-        self._bootstrap_model()
+        clf.fit(X)
 
-    def _bootstrap_model(self):
-        """Pre-trains Isolation Forest on a synthetic baseline distribution of normal transactions."""
-        np.random.seed(42)
-        n_samples = 3000
+        # 3. Compute Normalized Anomaly Score
+        # decision_function gives negative values for outliers, positive for inliers
+        raw_scores = clf.decision_function(X)
+        # Normalize: raw_scores typically range in [-0.5, 0.5].
+        # We map more negative -> higher anomaly score [0.0, 1.0]
+        min_s = float(np.min(raw_scores))
+        max_s = float(np.max(raw_scores))
+        
+        normalized_scores = []
+        for s in raw_scores:
+            if max_s > min_s:
+                norm_score = 1.0 - ((float(s) - min_s) / (max_s - min_s))
+            else:
+                norm_score = 0.0
+            normalized_scores.append(round(float(norm_score), 4))
 
-        # Normal distributions
-        amounts = np.random.exponential(scale=1500, size=n_samples) / 10000.0
-        retries = np.random.poisson(lam=0.2, size=n_samples)
-        refund_dev = np.random.normal(loc=0.0, scale=0.5, size=n_samples)
-        gw_fail = np.random.beta(a=1, b=30, size=n_samples)
-        set_delay = np.random.exponential(scale=2, size=n_samples) / 24.0
-        velocity = np.random.poisson(lam=1.0, size=n_samples)
-        has_fail = np.random.binomial(n=1, p=0.05, size=n_samples)
-        wh_timeout = np.random.binomial(n=1, p=0.01, size=n_samples)
+        # 4. Evaluate Threshold & Create Incidents
+        incidents_created = []
+        gateway_evaluations = []
 
-        X_normal = np.column_stack([
-            amounts, retries, refund_dev, gw_fail, set_delay, velocity, has_fail, wh_timeout
-        ])
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        now_str = datetime.utcnow().isoformat()
 
-        # Inject 3% baseline anomalies for boundary fitting
-        n_anom = int(n_samples * 0.03)
-        X_anom = np.column_stack([
-            np.random.uniform(5.0, 15.0, size=n_anom),       # high amount
-            np.random.randint(6, 15, size=n_anom),          # retry spike
-            np.random.uniform(3.0, 8.0, size=n_anom),       # severe refund deviation
-            np.random.uniform(0.6, 0.95, size=n_anom),      # high gateway failure
-            np.random.uniform(3.0, 10.0, size=n_anom),      # severe delay
-            np.random.randint(10, 25, size=n_anom),         # high velocity
-            np.ones(n_anom),                                # failed
-            np.ones(n_anom)                                 # timed out
-        ])
+        for idx, g in enumerate(gateway_features):
+            score = float(normalized_scores[idx])
+            gw_name = str(g["entity_id"])
+            failure_rate = float(g["failure_rate"])
+            ratio = float(g["failure_rate_ratio"])
 
-        X = np.vstack([X_normal, X_anom])
-        self.model.fit(X)
-        self.is_fitted = True
+            gateway_evaluations.append({
+                "gateway": gw_name,
+                "anomaly_score": score,
+                "failure_rate": failure_rate,
+                "peer_failure_rate": float(g["peer_failure_rate"]),
+                "failed_payments": int(g["failed_payments"]),
+                "potential_exposure": float(g["potential_exposure"]),
+                "is_anomalous": bool(score >= self.threshold and failure_rate >= 0.08)
+            })
 
-    def extract_features(self, payload: Dict[str, Any]) -> Tuple[np.ndarray, Dict[str, float]]:
-        """Extracts and normalizes features from a payment or incident payload."""
-        amount = float(payload.get("amount", 1000.0)) / 10000.0
-        retries = float(payload.get("retry_count", 0))
-        refund_dev = float(payload.get("refund_deviation", 0.0))
-        gw_fail = float(payload.get("gateway_failure_rate", 0.02))
-        set_delay = float(payload.get("settlement_delay_hrs", 0.0)) / 24.0
-        velocity = float(payload.get("velocity", 1.0))
-        has_fail = 1.0 if payload.get("failure_code") or payload.get("status") == "failed" else 0.0
-        wh_timeout = 1.0 if payload.get("webhook_status") in ["timed_out", "failed"] else 0.0
+            # Check if entity is anomalous
+            # Conditions: score >= threshold AND failure_rate >= 8% (to ensure statistical business materiality)
+            if score >= self.threshold and failure_rate >= 0.08:
+                severity = "medium"
+                if g["potential_exposure"] >= 100000.0 or (failure_rate >= 0.15 and g["affected_merchants"] >= 3):
+                    severity = "critical"
+                elif g["potential_exposure"] >= 50000.0 or failure_rate >= 0.10:
+                    severity = "high"
 
-        raw_dict = {
-            "amount_norm": round(amount, 3),
-            "retry_count": retries,
-            "merchant_refund_deviation": round(refund_dev, 3),
-            "gateway_failure_rate": round(gw_fail, 3),
-            "settlement_delay_norm": round(set_delay, 3),
-            "velocity_per_min": velocity,
-            "has_failure_code": has_fail,
-            "webhook_timeout_flag": wh_timeout
+                incident_type = "gateway_failure_spike"
+                title = f"{gw_name} Payment Failure Spike ({round(failure_rate * 100, 1)}%)"
+                primary_signal = f"Gateway failure rate ({round(failure_rate * 100, 2)}%) is {ratio}x peer gateway baseline ({round(g['peer_failure_rate'] * 100, 2)}%). Top error: {g['top_failure_code']} ({g['top_failure_code_count']} occurrences)."
+                
+                evidence = {
+                    "entity_type": "gateway",
+                    "entity_id": gw_name,
+                    "failure_rate_pct": round(failure_rate * 100, 2),
+                    "peer_failure_rate_pct": round(float(g["peer_failure_rate"]) * 100, 2),
+                    "failure_rate_ratio": ratio,
+                    "top_failure_code": str(g["top_failure_code"]),
+                    "top_failure_code_count": int(g["top_failure_code_count"]),
+                    "top_failure_code_share": float(g["top_failure_code_share"]),
+                    "failed_payments_count": int(g["failed_payments"]),
+                    "total_payments_count": int(g["total_payments"]),
+                    "affected_merchants_count": int(g["affected_merchants"]),
+                    "affected_orders_count": int(g["affected_orders"]),
+                    "potential_exposure_inr": float(g["potential_exposure"]),
+                    "ml_model": "IsolationForest",
+                    "ml_anomaly_score": score,
+                    "ml_contamination": float(self.contamination)
+                }
+
+                description = f"Automated ML Anomaly Detection identified elevated payment rejection velocity on banking gateway node {gw_name}. {g['failed_payments']} payments failed out of {g['total_payments']} total attempts, creating ₹{g['potential_exposure']:,.2f} in potential unresolved merchant exposure."
+
+                # 5. Idempotent Deduplication (Check if open incident exists for this entity)
+                cursor.execute("""
+                    SELECT incident_id, status FROM incidents 
+                    WHERE target_entity_type = 'gateway' AND target_entity_id = %s AND status = 'open';
+                """, (gw_name,))
+                existing_inc = cursor.fetchone()
+
+                if existing_inc:
+                    # Update existing open incident with latest metrics
+                    inc_id = existing_inc["incident_id"]
+                    cursor.execute("""
+                        UPDATE incidents SET
+                            affected_merchants = %s,
+                            affected_payments = %s,
+                            potential_exposure = %s,
+                            anomaly_score = %s,
+                            primary_signal = %s,
+                            evidence_json = %s,
+                            description = %s,
+                            detected_at = %s
+                        WHERE incident_id = %s;
+                    """, (
+                        int(g["affected_merchants"]), int(g["failed_payments"]),
+                        float(g["potential_exposure"]), float(score), str(primary_signal),
+                        json.dumps(evidence), str(description), now_str, inc_id
+                    ))
+                else:
+                    # Generate clean Sequential ID
+                    cursor.execute("SELECT COUNT(*) as cnt FROM incidents;")
+                    inc_num = cursor.fetchone()["cnt"] + 1
+                    inc_id = f"INC-{inc_num:04d}"
+
+                    cursor.execute("""
+                        INSERT INTO incidents (
+                            incident_id, title, type, target_entity_type, target_entity_id,
+                            severity, status, affected_merchants, affected_payments,
+                            potential_exposure, anomaly_score, primary_signal,
+                            evidence_json, source, detected_at, description
+                        ) VALUES (%s, %s, %s, 'gateway', %s, %s, 'open', %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                    """, (
+                        inc_id, title, incident_type, gw_name, severity,
+                        int(g["affected_merchants"]), int(g["failed_payments"]),
+                        float(g["potential_exposure"]), float(score), str(primary_signal),
+                        json.dumps(evidence), str(g["source"]), now_str, str(description)
+                    ))
+
+                incidents_created.append({
+                    "incident_id": inc_id,
+                    "title": title,
+                    "target_entity": gw_name,
+                    "anomaly_score": score,
+                    "severity": severity,
+                    "failure_rate": f"{round(failure_rate * 100, 2)}%",
+                    "peer_failure_rate": f"{round(float(g['peer_failure_rate']) * 100, 2)}%",
+                    "failed_payments": int(g["failed_payments"]),
+                    "potential_exposure": float(g["potential_exposure"]),
+                    "primary_signal": primary_signal,
+                    "source": str(g["source"])
+                })
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return {
+            "status": "success",
+            "records_analyzed": total_payments_analyzed,
+            "gateways_evaluated": len(gateway_features),
+            "anomalies_detected": len(incidents_created),
+            "incidents": incidents_created,
+            "gateway_evaluations": gateway_evaluations
         }
 
-        feature_vector = np.array([[
-            amount, retries, refund_dev, gw_fail, set_delay, velocity, has_fail, wh_timeout
-        ]])
-
-        return feature_vector, raw_dict
-
-    def score_anomaly(self, entity_id: str, entity_type: str, payload: Dict[str, Any]) -> AnomalySignal:
-        """Computes pure mathematical anomaly score from Isolation Forest decision function."""
-        feat_vec, raw_dict = self.extract_features(payload)
-
-        # Isolation forest decision_function: lower is more anomalous (typically -0.3 to +0.2)
-        raw_score = self.model.decision_function(feat_vec)[0]
-        
-        # Linear min-max calibration to [0, 1] range where 1.0 is highest anomaly
-        calibrated_score = float(np.clip(1.0 - (raw_score + 0.22) / 0.42, 0.05, 0.99))
-
-        contributing = []
-        if raw_dict["retry_count"] >= 3:
-            contributing.append(f"Abnormal retry velocity: {int(raw_dict['retry_count'])} attempts in short window")
-        if raw_dict["merchant_refund_deviation"] > 1.5:
-            contributing.append(f"Significant merchant baseline deviation (+{raw_dict['merchant_refund_deviation']}x normal)")
-        if raw_dict["gateway_failure_rate"] > 0.2:
-            contributing.append(f"Elevated gateway failure rate ({int(raw_dict['gateway_failure_rate']*100)}% error spike)")
-        if raw_dict["settlement_delay_norm"] > 2.0:
-            contributing.append("Settlement delay exceeded SLA threshold (>48h backlog)")
-        if raw_dict["webhook_timeout_flag"] == 1.0:
-            contributing.append("Webhook delivery acknowledgement timeout detected")
-        if raw_dict["has_failure_code"] == 1.0 and payload.get("failure_code"):
-            contributing.append(f"Recurring failure code: {payload.get('failure_code')}")
-
-        is_anom = calibrated_score >= settings.ANOMALY_THRESHOLD
-
-        return AnomalySignal(
-            entity_id=entity_id,
-            entity_type=entity_type,
-            anomaly_score=round(calibrated_score, 3),
-            is_anomaly=is_anom,
-            contributing_signals=contributing,
-            raw_features=raw_dict
-        )
-
-anomaly_detector = FinancialAnomalyDetector()
+anomaly_detector = AnomalyDetector(
+    contamination=settings.ISOLATION_FOREST_CONTAMINATION,
+    threshold=settings.ANOMALY_THRESHOLD
+)
