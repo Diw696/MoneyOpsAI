@@ -14,24 +14,22 @@ def setup_clean_db():
     init_db()
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM audit_logs")
-    c.execute("DELETE FROM ai_investigation_steps")
-    c.execute("DELETE FROM ai_investigations")
-    c.execute("DELETE FROM incidents")
-    c.execute("DELETE FROM webhook_events")
-    c.execute("DELETE FROM refunds")
-    c.execute("DELETE FROM payments")
-    c.execute("DELETE FROM orders")
-    c.execute("DELETE FROM merchants")
+    c.execute("TRUNCATE TABLE audit_logs, ai_investigation_steps, ai_investigations, incidents, webhook_events, refunds, payments, orders, merchants CASCADE;")
     conn.commit()
+    c.close()
     conn.close()
 
-def test_database_schema_created():
-    """Verify all 9 clean V2 tables exist in SQLite."""
+def test_database_schema_created_in_postgresql():
+    """Verify all 9 clean V2 tables exist in PostgreSQL information_schema."""
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-    tables = [row["name"] for row in c.fetchall()]
+    c.execute("""
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        ORDER BY table_name;
+    """)
+    tables = [row["table_name"] for row in c.fetchall()]
+    c.close()
     conn.close()
 
     expected_tables = [
@@ -46,7 +44,7 @@ def test_database_schema_created():
         "webhook_events"
     ]
     for tbl in expected_tables:
-        assert tbl in tables, f"Expected table '{tbl}' to exist in V2 schema"
+        assert tbl in tables, f"Expected table '{tbl}' to exist in PostgreSQL schema"
 
 def test_mapper_conversion_official_fields():
     """Test mapper accurately parses official Razorpay Test Mode response fields."""
@@ -64,7 +62,7 @@ def test_mapper_conversion_official_fields():
     p_dict = RazorpayMapper.payment_to_db_dict(raw_payment, source="razorpay_test")
     assert p_dict["payment_id"] == "pay_test_001"
     assert p_dict["amount"] == 4999.0
-    assert p_dict["gateway"] == "HDFC"
+    assert p_dict["gateway"] == "Gateway_HDFC"
     assert p_dict["source"] == "razorpay_test"
     assert "2024" in p_dict["created_at"]
 
@@ -106,10 +104,10 @@ def test_sync_endpoint_without_credentials():
         assert data["orders_fetched"] == 0
         assert data["refunds_fetched"] == 0
 
-def test_sync_endpoint_end_to_end_persists_to_sqlite():
+def test_sync_endpoint_end_to_end_persists_to_postgresql():
     """
     Test End-to-End:
-    Razorpay API response -> Sync Endpoint -> SQLite Upsert -> Query Endpoints.
+    Razorpay API response -> Sync Endpoint -> PostgreSQL Upsert -> Query Endpoints.
     """
     mock_orders = [
         RazorpayOrderEntity(
@@ -161,7 +159,7 @@ def test_sync_endpoint_end_to_end_persists_to_sqlite():
         assert sync_result["refunds_fetched"] == 1
         assert sync_result["payments_upserted"] == 1
 
-        # 2. Verify Persistence in SQLite via GET Endpoints
+        # 2. Verify Persistence in PostgreSQL via GET Endpoints
         p_res = client.get("/api/payments")
         assert p_res.status_code == 200
         payments = p_res.json()

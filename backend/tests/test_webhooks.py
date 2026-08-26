@@ -17,23 +17,16 @@ def setup_clean_db(monkeypatch):
     init_db()
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM audit_logs")
-    c.execute("DELETE FROM ai_investigation_steps")
-    c.execute("DELETE FROM ai_investigations")
-    c.execute("DELETE FROM incidents")
-    c.execute("DELETE FROM webhook_events")
-    c.execute("DELETE FROM refunds")
-    c.execute("DELETE FROM payments")
-    c.execute("DELETE FROM orders")
-    c.execute("DELETE FROM merchants")
+    c.execute("TRUNCATE TABLE audit_logs, ai_investigation_steps, ai_investigations, incidents, webhook_events, refunds, payments, orders, merchants CASCADE;")
     conn.commit()
+    c.close()
     conn.close()
 
 def generate_signature(body: bytes, secret: str = SECRET) -> str:
     return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
 def test_webhook_valid_signature_payment_captured():
-    """Verify valid signature processes payment.captured and stores in payments + webhook_events."""
+    """Verify valid signature processes payment.captured and stores in PostgreSQL."""
     payload = {
         "entity": "event",
         "account_id": "acc_TU6z7jmcjJLP4N",
@@ -72,11 +65,14 @@ def test_webhook_valid_signature_payment_captured():
     assert data["event_type"] == "payment.captured"
     assert data["entity_id"] == "pay_test_cap_001"
 
-    # Verify SQLite persistence
+    # Verify PostgreSQL persistence
     conn = get_db_connection()
     c = conn.cursor()
-    pay_row = dict(c.execute("SELECT * FROM payments WHERE payment_id = 'pay_test_cap_001'").fetchone())
-    wh_row = dict(c.execute("SELECT * FROM webhook_events WHERE external_event_id = 'x_evt_pay_cap_001'").fetchone())
+    c.execute("SELECT * FROM payments WHERE payment_id = %s;", ("pay_test_cap_001",))
+    pay_row = dict(c.fetchone())
+    c.execute("SELECT * FROM webhook_events WHERE external_event_id = %s;", ("x_evt_pay_cap_001",))
+    wh_row = dict(c.fetchone())
+    c.close()
     conn.close()
 
     assert pay_row["amount"] == 3500.0
@@ -151,18 +147,21 @@ def test_webhook_duplicate_event_id_idempotency():
     assert res2.json()["status"] == "duplicate_skipped"
     assert "already ingested (idempotency enforced)" in res2.json()["message"]
 
-    # Verify only 1 webhook record and 1 payment record exists in SQLite
+    # Verify only 1 webhook record and 1 payment record exists in PostgreSQL
     conn = get_db_connection()
     c = conn.cursor()
-    wh_count = c.execute("SELECT COUNT(*) as cnt FROM webhook_events WHERE external_event_id = 'x_evt_idem_001'").fetchone()["cnt"]
-    pay_count = c.execute("SELECT COUNT(*) as cnt FROM payments WHERE payment_id = 'pay_idem_001'").fetchone()["cnt"]
+    c.execute("SELECT COUNT(*) as cnt FROM webhook_events WHERE external_event_id = %s;", ("x_evt_idem_001",))
+    wh_count = c.fetchone()["cnt"]
+    c.execute("SELECT COUNT(*) as cnt FROM payments WHERE payment_id = %s;", ("pay_idem_001",))
+    pay_count = c.fetchone()["cnt"]
+    c.close()
     conn.close()
 
     assert wh_count == 1
     assert pay_count == 1
 
 def test_webhook_order_paid_event():
-    """Verify order.paid event is normalized into orders table."""
+    """Verify order.paid event is normalized into orders table in PostgreSQL."""
     payload = {
         "event": "order.paid",
         "id": "x_evt_ord_001",
@@ -192,7 +191,9 @@ def test_webhook_order_paid_event():
 
     conn = get_db_connection()
     c = conn.cursor()
-    ord_row = dict(c.execute("SELECT * FROM orders WHERE order_id = 'order_test_hook_001'").fetchone())
+    c.execute("SELECT * FROM orders WHERE order_id = %s;", ("order_test_hook_001",))
+    ord_row = dict(c.fetchone())
+    c.close()
     conn.close()
 
     assert ord_row["amount"] == 8999.0
@@ -200,7 +201,7 @@ def test_webhook_order_paid_event():
     assert ord_row["source"] == "razorpay_webhook"
 
 def test_webhook_refund_processed_event():
-    """Verify refund.processed event is normalized into refunds table."""
+    """Verify refund.processed event is normalized into refunds table in PostgreSQL."""
     payload = {
         "event": "refund.processed",
         "id": "x_evt_ref_001",
@@ -232,7 +233,9 @@ def test_webhook_refund_processed_event():
 
     conn = get_db_connection()
     c = conn.cursor()
-    ref_row = dict(c.execute("SELECT * FROM refunds WHERE refund_id = 'rfnd_test_hook_001'").fetchone())
+    c.execute("SELECT * FROM refunds WHERE refund_id = %s;", ("rfnd_test_hook_001",))
+    ref_row = dict(c.fetchone())
+    c.close()
     conn.close()
 
     assert ref_row["amount"] == 1500.0

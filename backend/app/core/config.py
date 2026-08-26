@@ -6,18 +6,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(exist_ok=True)
-
-DB_PATH = str(DATA_DIR / "moneyops_v2.db")
 
 class Settings(BaseModel):
     APP_NAME: str = "MoneyOps AI V2"
     APP_VERSION: str = "2.0.0"
     TAGLINE: str = "An AI financial incident investigator for Razorpay payment operations."
     
-    DATABASE_URL: str = f"sqlite:///{DB_PATH}"
-    DB_PATH: str = DB_PATH
+    # PostgreSQL Primary Database Configuration
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:password@127.0.0.1:5432/moneyops_v2")
     
     # Razorpay Test Mode Credentials
     RAZORPAY_KEY_ID: str = os.getenv("RAZORPAY_KEY_ID", "")
@@ -33,7 +29,7 @@ class Settings(BaseModel):
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
     
-    # ML & Engine Settings
+    # Engine Settings
     ISOLATION_FOREST_CONTAMINATION: float = 0.05
     ANOMALY_THRESHOLD: float = 0.65
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "*"]

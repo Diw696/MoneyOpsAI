@@ -1,41 +1,52 @@
 from app.engine.database import get_db_connection
 
 def print_db_stats():
+    print("=" * 65)
+    print(" MONEYOPS AI — POSTGRESQL DATABASE OBSERVABILITY & METRICS")
+    print("=" * 65)
+    
     conn = get_db_connection()
-    cursor = conn.cursor()
-
+    c = conn.cursor()
+    
     tables = [
-        "raw_external_events", "customers", "merchants", "orders",
-        "payments", "refunds", "settlements", "disputes",
-        "webhook_events", "canonical_events", "incidents",
-        "historical_cases", "investigations", "audit_logs"
+        "merchants", "orders", "payments", "refunds",
+        "webhook_events", "incidents", "ai_investigations",
+        "ai_investigation_steps", "audit_logs"
     ]
-
-    print("=" * 60)
-    print(" MONEYOPS AI — RELATIONAL DATABASE & LINEAGE AUDIT")
-    print("=" * 60)
-
+    
+    print("\n1. Table Row Counts:")
     for tbl in tables:
-        try:
-            cursor.execute(f"SELECT COUNT(*) as cnt FROM {tbl}")
-            cnt = cursor.fetchone()["cnt"]
-            print(f"  {tbl:<25}: {cnt:>6} rows")
-        except Exception as e:
-            print(f"  {tbl:<25}: Error ({e})")
+        c.execute(f"SELECT COUNT(*) as cnt FROM {tbl};")
+        cnt = c.fetchone()["cnt"]
+        print(f"  - {tbl:<25}: {cnt:>6} rows")
 
-    print("-" * 60)
-    cursor.execute("SELECT source, COUNT(*) as cnt FROM payments GROUP BY source")
-    print("Payments Lineage Breakdown:")
-    for row in cursor.fetchall():
-        print(f"  - Source '{row['source']}': {row['cnt']} payments")
+    print("\n2. Payment Records by Provenance (Source):")
+    c.execute("SELECT source, COUNT(*) as count FROM payments GROUP BY source ORDER BY count DESC;")
+    pay_sources = c.fetchall()
+    if pay_sources:
+        for r in pay_sources:
+            print(f"  - {r['source']:<25}: {r['count']:>6} payments")
+    else:
+        print("  - (No payments found)")
 
-    cursor.execute("SELECT source, COUNT(*) as cnt FROM raw_external_events GROUP BY source")
-    print("Raw Events Lineage Breakdown:")
-    for row in cursor.fetchall():
-        print(f"  - Source '{row['source']}': {row['cnt']} raw events")
+    print("\n3. Order Records by Provenance (Source):")
+    c.execute("SELECT source, COUNT(*) as count FROM orders GROUP BY source ORDER BY count DESC;")
+    ord_sources = c.fetchall()
+    if ord_sources:
+        for r in ord_sources:
+            print(f"  - {r['source']:<25}: {r['count']:>6} orders")
+    else:
+        print("  - (No orders found)")
 
-    print("=" * 60)
+    print("\n4. Payment Status Distribution:")
+    c.execute("SELECT status, COUNT(*) as count FROM payments GROUP BY status ORDER BY count DESC;")
+    pay_statuses = c.fetchall()
+    for r in pay_statuses:
+        print(f"  - {r['status']:<25}: {r['count']:>6} payments")
+
+    c.close()
     conn.close()
+    print("=" * 65)
 
 if __name__ == "__main__":
     print_db_stats()
