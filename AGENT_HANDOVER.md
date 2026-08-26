@@ -1,67 +1,199 @@
-# MoneyOps AI — Agent Handover & Quick Reference
+# MONEYOPS AI V2 — COMPLETE AGENT HANDOVER & SYSTEM STATE
 
-> **Full Documentation:** See [`docs/AGENT_HANDOVER_AND_STATUS.md`](file:///c:/Users/asus/Desktop/RzorPayInternProj/docs/AGENT_HANDOVER_AND_STATUS.md) for exhaustive architectural specifications, mathematical models, and database schema dictionaries.
-
----
-
-## ⚡ Quick Answers for Any Incoming AI Agent
-
-### 1. What is the whole thing? (Product Definition)
-**MoneyOps AI** is an **AI-native financial incident investigator** for digital payment platforms (Razorpay).  
-When payment/refund/settlement anomalies occur, MoneyOps answers:
-1. **WHAT HAPPENED?** (Blast radius, affected merchants, exposure)
-2. **WHY DID IT HAPPEN?** (Cross-entity graph traversal, retry races, gateway timeout root cause)
-3. **WHAT SHOULD WE DO?** (Dense vector case memory matching + Governed action recommendation)
-
-### 2. What have we done?
-- **14 SQLite Tables (WAL Mode):** Full relational schema with foreign keys, query indexes, and a dedicated `raw_external_events` table.
-- **Official Razorpay Test Mode Client:** Authenticated REST client (`fetch_payments`, `fetch_orders`, `fetch_refunds`, `create_test_refund`) with HMAC-SHA256 webhook signature validation.
-- **Raw Layer & Idempotency:** Raw JSON persistence, `x-razorpay-event-id` deduplication, and on-demand parent entity reconciliation.
-- **Canonical Event Pipeline:** Ingests external streams into `CanonicalEvent` with pure database-derived operational KPIs.
-- **Merchant Behavioral Memory:** Rolling 30-day baseline deviations computed via live SQL window queries.
-- **Unsupervised ML Anomaly Detection:** Scikit-learn `IsolationForest` pipeline on 8 engineered financial features.
-- **NetworkX Money Graph:** Graph traversal modeling `Merchant → Order → Payment → [Refunds, Settlements, Webhooks]`.
-- **Dense Case Memory:** 384-dimensional dense neural embeddings (`SentenceTransformer all-MiniLM-L6-v2`) with pure mathematical cosine similarity.
-- **Provider-Agnostic Agent:** Multi-turn ReAct tool-calling loop (Anthropic Claude, Local Ollama/vLLM, or Local Deterministic Reasoner).
-- **Three-Tier Action Governor:** Green (Observe), Yellow (Recommend), Red (Human Authorization Enforced) with immutable SQLite `audit_logs`.
-- **20 Automated Tests:** 100% passing test suite in `backend/tests/`.
-- **React 18 Dashboard:** Live Operations Control Center with SVG Money Graph, Webhook Simulator, and Forensic Data Lineage view.
-
-### 3. What is this data? (Dual Data Source)
-1. **`source="razorpay_test"` (Razorpay Test Mode):** Live REST API payloads and HMAC-SHA256 signed webhooks.
-2. **`source="synthetic"` (Incident Laboratory):** Generated via `python generate_data.py --seed 42` (25 merchants, 300 customers, 2,500+ normal txs, and 4 injected golden anomalies).
-
-### 4. Are we using APIs?
-- **Razorpay REST API:** (`https://api.razorpay.com/v1`) with HTTP Basic Auth.
-- **LLM APIs:** Anthropic Claude API / Local OpenAI-compatible API (`http://localhost:11434/v1`) / Local Deterministic Reasoner.
-- **MoneyOps Backend API:** FastAPI on `http://127.0.0.1:8000`.
-
-### 5. What is running right now?
-- **Backend API:** `http://127.0.0.1:8000` (Running in background task-570)
-- **Frontend UI:** `http://127.0.0.1:5173` (Running in background task-129)
-- **Database:** `backend/data/moneyops.db` (Initialized & Seeded)
+> **Repository:** `https://github.com/Diw696/MoneyOpsAI` (Branch: `main`)  
+> **Architecture Level:** Clean V2 Engineering Rebuild (Phases 1 through Phase C Complete)  
+> **Database:** PostgreSQL 18.1 (`moneyops_v2` on `127.0.0.1:5432`)  
+> **Last Updated:** August 26, 2026
 
 ---
 
-## 🛠️ Key Commands to Run / Inspect
+## 1. Executive Product Definition
+
+**MoneyOps AI** is an **AI-assisted financial incident investigator for Razorpay digital payment operations**.
+
+When payment anomalies, failure spikes, refund velocity deviations, or settlement rejections occur, MoneyOps answers:
+1. **WHAT HAPPENED?** (Blast radius, failure volume, affected merchants, potential financial exposure)
+2. **WHY DID IT HAPPEN?** (Root cause identification, banking gateway timeout signatures, error code concentration)
+3. **WHAT SHOULD WE DO?** (Actionable mitigation recommendations, traffic diversion, and governed operations execution)
+
+### 🚨 Core Philosophy & Non-Negotiable Invariants:
+```text
+SOURCE ──► INGEST ──► STORE ──► PROCESS ──► DETECT ──► INVESTIGATE ──► RECOMMEND
+```
+- **NO Hardcoded Incidents:** The system never fabricates incidents or fake AI narratives.
+- **NO Bypassing the Pipeline:** Real Razorpay data and Incident Lab simulations pass through the exact same `CanonicalEvent` $\to$ `IngestionPipeline` $\to$ PostgreSQL path.
+- **NO Fake AI Fallbacks:** If `GEMINI_API_KEY` is not present, the system explicitly reports `AI_NOT_CONFIGURED` / `AI OFFLINE`.
+- **Auditable Provenance:** Every record carries explicit provenance: `source = 'razorpay_test'`, `source = 'razorpay_webhook'`, or `source = 'incident_lab'`.
+
+---
+
+## 2. End-to-End System Architecture
+
+```text
+┌─────────────────────────┐
+│ Real Razorpay REST API  │──► [Razorpay Mapper] ──┐
+└─────────────────────────┘                        │
+                                                   │
+┌─────────────────────────┐                        │
+│ Real Razorpay Webhooks  │──► [Webhook Adapter] ──┼──► [CanonicalEvent]
+└─────────────────────────┘                        │            │
+                                                   │            ▼
+┌─────────────────────────┐                        │   [IngestionPipeline]
+│ Incident Lab Generator  │──► [Lab Adapter] ──────┘            │
+└─────────────────────────┘                                     ▼
+                                                       [PostgreSQL 18 Database]
+                                                           (moneyops_v2)
+                                                                │
+                                                                ▼
+                                                        [Feature Engine]
+                                                        (Dynamic SQL Metrics)
+                                                                │
+                                                                ▼
+                                                       [IsolationForest ML]
+                                                        (Unsupervised Outlier)
+                                                                │
+                                                                ▼
+                                                      [Incidents Table] (INC-0001)
+                                                                │
+                                                                ▼
+                                                    [Google Gemini 2.0 Agent]
+                                                  (Multi-Turn Tool Calling Loop)
+                                                                │
+                                        ┌───────────────────────┴───────────────────────┐
+                                        ▼                                               ▼
+                           [7 PostgreSQL Forensic Tools]                      [InvestigationStudio UI]
+                           - get_incident                                     - What Happened
+                           - get_gateway_metrics                              - Why (Root Cause)
+                           - get_failed_payments                              - Impact & Exposure
+                           - get_affected_merchants                           - Evidence Cards
+                           - get_payment_context                              - Action Recommendation
+                           - get_webhook_activity                             - Auditable Tool Trace
+                           - find_similar_incidents
+```
+
+---
+
+## 3. Work Completed Till Now (Phases Breakdown)
+
+### Phase 1–4: Foundation & Live Razorpay REST Connectivity
+- Connected live Razorpay Test Mode account (`rzp_test_TU6z7jmcjJLP4N`).
+- Implemented authenticated REST client (`fetch_orders`, `fetch_payments`, `fetch_refunds`).
+- Verified real HTTP request $\to$ actual Razorpay JSON response $\to$ database persistence.
+
+### Phase 5: Live Webhook Ingestion & HMAC-SHA256 Verification
+- Implemented `POST /api/webhooks/razorpay`.
+- Enforced cryptographic signature verification (`X-Razorpay-Signature`) and idempotency via `x-razorpay-event-id`.
+
+### Phase 5.5: SQLite $\to$ PostgreSQL 18 Migration
+- Migrated primary persistence from SQLite to PostgreSQL 18 (`moneyops_v2`).
+- Recreated clean 9-table schema with foreign keys (`ON DELETE CASCADE`) and performance indexes.
+- Archived legacy SQLite databases into `archive/moneyops_v1_sqlite/`.
+
+### Phase A: Unified Data Ingestion Foundation
+- Created centralized `CanonicalEvent` validation contract ([`pipeline.py`](file:///c:/Users/asus/Desktop/RzorPayInternProj/backend/app/engine/pipeline.py)) and transactional batch ingestion engine.
+- Created `IncidentLabGenerator` ([`incident_lab.py`](file:///c:/Users/asus/Desktop/RzorPayInternProj/backend/app/engine/incident_lab.py)) generating reproducible multi-merchant financial lifecycles with controllable anomaly modes (`gateway_spike`, `refund_spike`, `duplicate_refund`, `webhook_retry`).
+- Added observability endpoints `GET /api/stats` and `GET /api/stats/sources`.
+
+### Phase B: Feature Engine & Isolation Forest Anomaly Detection
+- Built explainable feature engine ([`feature_engine.py`](file:///c:/Users/asus/Desktop/RzorPayInternProj/backend/app/engine/feature_engine.py)) computing failure rates, peer gateway baselines, error code concentrations, and exposure.
+- Fitted unsupervised `sklearn.ensemble.IsolationForest` ([`anomaly_detector.py`](file:///c:/Users/asus/Desktop/RzorPayInternProj/backend/app/engine/anomaly_detector.py)) without hardcoded gateway rules.
+- Discovered anomaly on **`Gateway_X`** (**19.08% failure rate vs 3.52% peer baseline**, 87 rejections, 74 `GATEWAY_TIMEOUT` errors).
+- Created structured incident **`INC-0001`** in PostgreSQL with INR 158,842.85 potential exposure.
+- Verified second-run deduplication and healthy-dataset zero-anomaly verification.
+
+### Phase C: Real AI Investigation Engine & Gemini Tool Calling
+- Built 7 authoritative investigation tools ([`investigation_tools.py`](file:///c:/Users/asus/Desktop/RzorPayInternProj/backend/app/engine/investigation_tools.py)) querying PostgreSQL directly.
+- Implemented autonomous multi-turn Gemini agent ([`gemini_agent.py`](file:///c:/Users/asus/Desktop/RzorPayInternProj/backend/app/engine/gemini_agent.py)) executing tools, recording each step in `ai_investigation_steps`, and persisting forensic reports in `ai_investigations`.
+- Enforced strict `AI_NOT_CONFIGURED` error handling when API key is missing (zero fake AI output).
+- Built clean, minimalist React UI ([`InvestigationStudio.jsx`](file:///c:/Users/asus/Desktop/RzorPayInternProj/frontend/src/components/InvestigationStudio.jsx), [`Header.jsx`](file:///c:/Users/asus/Desktop/RzorPayInternProj/frontend/src/components/Header.jsx), [`App.jsx`](file:///c:/Users/asus/Desktop/RzorPayInternProj/frontend/src/App.jsx)).
+- 32/32 automated tests passing.
+
+---
+
+## 4. Everything Updated, Changed, and Archived
+
+| Category | Component | Status / Changes Made |
+| :--- | :--- | :--- |
+| **Database** | PostgreSQL 18.1 (`moneyops_v2`) | Active primary database replacing legacy SQLite. |
+| **Archived DB** | `archive/moneyops_v1_sqlite/` | Archived `moneyops.db` and `moneyops_v2.db`. |
+| **Archived Tests** | `archive/legacy_v1_tests/` | Moved legacy V1 test scripts (`test_agent.py`, `test_case_memory.py`, `test_money_graph.py`, etc.). |
+| **Ingestion** | `backend/app/engine/pipeline.py` | Centralized `CanonicalEvent` and `IngestionPipeline`. |
+| **ML Detector** | `backend/app/engine/anomaly_detector.py` | Unsupervised `IsolationForest` with PostgreSQL feature matrix. |
+| **AI Agent** | `backend/app/engine/gemini_agent.py` | Google Gemini 2.0 Flash tool-calling agent. |
+| **Tool Registry** | `backend/app/engine/investigation_tools.py` | 7 PostgreSQL parameterized forensic tools. |
+| **Frontend** | `frontend/src/` | Minimalist investigation studio with collapsible auditable trace. |
+
+---
+
+## 5. Active PostgreSQL Database State (`moneyops_v2`)
+
+| Table Name | Active Row Count | Primary Key | Key Relationships / Purpose |
+| :--- | :---: | :--- | :--- |
+| **`merchants`** | **10** | `merchant_id` | Master merchant directory with category & baseline refund rates. |
+| **`orders`** | **2,501** | `order_id` | Orders with status and amount in decimal INR. |
+| **`payments`** | **2,501** | `payment_id` | Payments with gateway, method, failure code, and timestamps. |
+| **`refunds`** | **30** | `refund_id` | Processed refunds with speed, reason, and merchant FKs. |
+| **`webhook_events`** | **2,501** | `event_id` | Validated webhook logs with raw payloads and delivery status. |
+| **`incidents`** | **1** | `incident_id` | **`INC-0001`** (`Gateway_X Failure Spike`, ₹158,842.85 exposure). |
+| **`ai_investigations`** | **Dynamic** | `investigation_id` | Stored forensic investigation reports from Gemini. |
+| **`ai_investigation_steps`** | **Dynamic** | `step_id` | Auditable tool-calling execution trace with arguments and latencies. |
+| **`audit_logs`** | **0** | `audit_id` | Action governor authorization history (Phase D target). |
+
+---
+
+## 6. Live Forensic Tool Registry (Gemini Accessible)
+
+1. **`get_incident(incident_id: str)`** $\to$ Metadata, severity, anomaly score from `incidents`.
+2. **`get_gateway_metrics(gateway: str)`** $\to$ Failure rate (19.08%), peer rate (3.52%), top error (`GATEWAY_TIMEOUT`), exposure.
+3. **`get_failed_payments(gateway: str, limit: int)`** $\to$ Transaction logs with failure codes and timestamps.
+4. **`get_affected_merchants(gateway: str)`** $\to$ Cross-merchant failure aggregation and exposure breakdown.
+5. **`get_payment_context(payment_id: str)`** $\to$ Relational graph: `payment` $\to$ `order` $\to$ `merchant` $\to$ `refunds` $\to$ `webhooks`.
+6. **`get_webhook_activity(gateway: str, limit: int)`** $\to$ Webhook event delivery logs and signatures.
+7. **`find_similar_incidents(incident_type: str)`** $\to$ Historical precedent lookup.
+
+---
+
+## 7. Active Services & Ports
+
+| Service | Technology | Address / Port | Background Task ID |
+| :--- | :--- | :--- | :--- |
+| **PostgreSQL Database** | PostgreSQL 18.1 | `127.0.0.1:5432` (DB: `moneyops_v2`) | `task-966` |
+| **Backend API Server** | FastAPI / Uvicorn | `http://127.0.0.1:8000` | `task-1262` |
+| **Frontend UI Dev Server** | Vite / React 18 | `http://127.0.0.1:5173` | `task-1291` |
+
+---
+
+## 8. CLI Commands Quick Reference
 
 ```powershell
-# 1. Run all tests
+# 1. Run Complete Automated Test Suite (32 tests)
 $env:PYTHONPATH="backend"
 .\venv\Scripts\python -m pytest backend/tests/ -v
 
-# 2. Inspect Database Lineage & Row Counts
-python -m app.jobs.db_stats
+# 2. View Real PostgreSQL Row Counts & Source Provenance
+$env:PYTHONPATH="backend"
+.\venv\Scripts\python -m app.jobs.db_stats
 
-# 3. Run Isolation Forest Anomaly Scan
-python -m app.jobs.detect_anomalies
+# 3. Trigger Unsupervised ML Anomaly Detection
+$env:PYTHONPATH="backend"
+.\venv\Scripts\python -m app.jobs.detect_anomalies
 
-# 4. Rebuild Money Graph from SQLite
-python -m app.jobs.rebuild_graph
+# 4. Run AI Investigation CLI (INC-0001)
+$env:PYTHONPATH="backend"
+.\venv\Scripts\python -m app.jobs.investigate_incident --incident INC-0001
 
-# 5. Run AI Investigation Agent via CLI
-python -m app.jobs.investigate INC-2841
-
-# 6. Re-seed Synthetic Incident Lab
-python generate_data.py --seed 42 --transactions 2500
+# 5. Generate Controlled Incident Lab Dataset
+$env:PYTHONPATH="backend"
+.\venv\Scripts\python -m app.jobs.generate_incident_lab --seed 42 --payments 2500 --anomaly gateway_spike
 ```
+
+---
+
+## 9. Next Planned Phase: Phase D (Action Governor)
+
+When approved, **Phase D** will implement:
+- Three-tier Action Governor:
+  - **Tier 1 (Green / Observe):** Safe read-only diagnostics.
+  - **Tier 2 (Yellow / Recommend):** Traffic shifting recommendations.
+  - **Tier 3 (Red / High-Stakes Action):** Automatic merchant refund pauses, gateway traffic cutover, requiring explicit human operator cryptographic approval.
+- Immutable PostgreSQL `audit_logs` persistence for every action attempt.
