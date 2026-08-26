@@ -61,6 +61,71 @@ export async function fetchIncidentInvestigations(incidentId) {
   return res.json();
 }
 
+// Action Governor API Functions (Phase D)
+export async function proposeAction(data) {
+  const res = await fetch(`${API_BASE}/actions/propose`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to propose action");
+  }
+  return res.json();
+}
+
+export async function approveAction(actionId, notes = "Authorized per FinOps Policy") {
+  const res = await fetch(`${API_BASE}/actions/${actionId}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor: "Human_Operator", operator_notes: notes })
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to approve action");
+  }
+  return res.json();
+}
+
+export async function rejectAction(actionId, reason = "Human operator rejected action") {
+  const res = await fetch(`${API_BASE}/actions/${actionId}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor: "Human_Operator", reason })
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to reject action");
+  }
+  return res.json();
+}
+
+export async function executeAction(actionId) {
+  const res = await fetch(`${API_BASE}/actions/${actionId}/execute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor: "Human_Operator" })
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to execute action");
+  }
+  return res.json();
+}
+
+export async function fetchIncidentActions(incidentId) {
+  const res = await fetch(`${API_BASE}/incidents/${incidentId}/actions`);
+  if (!res.ok) throw new Error("Failed to fetch incident actions");
+  return res.json();
+}
+
+export async function fetchAuditLogs() {
+  const res = await fetch(`${API_BASE}/audit-logs`);
+  if (!res.ok) throw new Error("Failed to fetch audit logs");
+  return res.json();
+}
+
 export async function triggerAnomalyDetection() {
   const res = await fetch(`${API_BASE}/anomalies/detect`, {
     method: "POST",

@@ -124,6 +124,18 @@ def init_db():
     cursor.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS primary_signal TEXT;")
     cursor.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS evidence_json TEXT;")
 
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS action_id VARCHAR(100);")
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS action_type VARCHAR(100);")
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50);")
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS new_status VARCHAR(50);")
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS reason TEXT;")
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS evidence_json TEXT;")
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS execution_result_json TEXT;")
+
+    cursor.execute("ALTER TABLE audit_logs ALTER COLUMN action_name DROP NOT NULL;")
+    cursor.execute("ALTER TABLE audit_logs ALTER COLUMN action_tier DROP NOT NULL;")
+    cursor.execute("ALTER TABLE audit_logs ALTER COLUMN approval_status DROP NOT NULL;")
+
     # 7. AI Investigations Table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS ai_investigations (
@@ -158,19 +170,40 @@ def init_db():
     );
     """)
 
-    # 9. Audit Logs Table
+    # 9. Governed Actions Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS governed_actions (
+        action_id VARCHAR(100) PRIMARY KEY,
+        incident_id VARCHAR(100) NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
+        investigation_id VARCHAR(100),
+        action_type VARCHAR(100) NOT NULL,
+        target_entity VARCHAR(100) NOT NULL,
+        risk_level VARCHAR(20) NOT NULL,
+        status VARCHAR(50) DEFAULT 'pending_approval',
+        reason TEXT NOT NULL,
+        evidence_json TEXT,
+        created_at TIMESTAMPTZ NOT NULL,
+        approved_by VARCHAR(100),
+        approved_at TIMESTAMPTZ,
+        executed_at TIMESTAMPTZ,
+        execution_result_json TEXT
+    );
+    """)
+
+    # 10. Audit Logs Table (Immutable Append-Only Log)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS audit_logs (
         audit_id VARCHAR(100) PRIMARY KEY,
-        investigation_id VARCHAR(100),
+        action_id VARCHAR(100),
         incident_id VARCHAR(100) NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
+        investigation_id VARCHAR(100),
+        action_type VARCHAR(100) NOT NULL,
+        previous_status VARCHAR(50),
+        new_status VARCHAR(50) NOT NULL,
         actor VARCHAR(100) NOT NULL,
-        action_name VARCHAR(100) NOT NULL,
-        action_tier VARCHAR(50) NOT NULL,
-        approval_status VARCHAR(50) NOT NULL,
-        operator_notes TEXT,
-        financial_exposure DOUBLE PRECISION DEFAULT 0.0,
-        simulated_action_result TEXT,
+        reason TEXT,
+        evidence_json TEXT,
+        execution_result_json TEXT,
         timestamp TIMESTAMPTZ NOT NULL
     );
     """)
@@ -184,6 +217,9 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_webhooks_external_id ON webhook_events(external_event_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_incidents_entity ON incidents(target_entity_type, target_entity_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_actions_incident ON governed_actions(incident_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_actions_status ON governed_actions(status);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action_id);")
 
     conn.commit()
     cursor.close()

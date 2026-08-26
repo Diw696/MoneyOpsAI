@@ -13,6 +13,7 @@ from app.integrations.razorpay.client import razorpay_client
 from app.integrations.razorpay.mapper import RazorpayMapper
 from app.integrations.razorpay.exceptions import RazorpayAuthError
 from app.engine.gemini_agent import gemini_agent
+from app.engine.action_governor import action_governor
 
 router = APIRouter()
 
@@ -436,4 +437,113 @@ def list_incident_investigations(incident_id: str):
                 pass
         results.append(d)
     return results
+
+# =============================================================================
+# ACTION GOVERNOR & HUMAN-IN-THE-LOOP (PHASE D)
+# =============================================================================
+
+class ProposeActionRequest(BaseModel):
+    incident_id: str
+    investigation_id: Optional[str] = None
+    action_type: str = "reroute_gateway_traffic"
+    target_entity: str = "Gateway_X"
+    reason: str
+    evidence: Optional[List[Dict[str, Any]]] = None
+    actor: str = "Gemini_Agent"
+
+class ApproveActionRequest(BaseModel):
+    actor: str = "Human_Operator"
+    operator_notes: str = "Authorized per FinOps Operational Policy"
+
+class RejectActionRequest(BaseModel):
+    actor: str = "Human_Operator"
+    reason: str = "Human operator rejected action recommendation"
+
+class ExecuteActionRequest(BaseModel):
+    actor: str = "Human_Operator"
+
+@router.post("/actions/propose")
+def propose_governed_action(req: ProposeActionRequest):
+    """Proposes a new governed action for an incident."""
+    try:
+        res = action_governor.propose_action(
+            incident_id=req.incident_id,
+            investigation_id=req.investigation_id,
+            action_type=req.action_type,
+            target_entity=req.target_entity,
+            reason=req.reason,
+            evidence=req.evidence,
+            actor=req.actor
+        )
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to propose action: {str(e)}")
+
+@router.post("/actions/{action_id}/approve")
+def approve_governed_action(action_id: str, req: ApproveActionRequest = ApproveActionRequest()):
+    """Grants human operator approval for a pending governed action."""
+    try:
+        res = action_governor.approve_action(
+            action_id=action_id,
+            actor=req.actor,
+            operator_notes=req.operator_notes
+        )
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Approval failed: {str(e)}")
+
+@router.post("/actions/{action_id}/reject")
+def reject_governed_action(action_id: str, req: RejectActionRequest = RejectActionRequest()):
+    """Rejects a proposed governed action."""
+    try:
+        res = action_governor.reject_action(
+            action_id=action_id,
+            actor=req.actor,
+            reason=req.reason
+        )
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Rejection failed: {str(e)}")
+
+@router.post("/actions/{action_id}/execute")
+def execute_governed_action(action_id: str, req: ExecuteActionRequest = ExecuteActionRequest()):
+    """
+    Executes a safe demonstration simulation for an approved action.
+    Blocks unapproved, rejected, or duplicate executions.
+    """
+    try:
+        res = action_governor.execute_action(
+            action_id=action_id,
+            actor=req.actor
+        )
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
+
+@router.get("/actions/{action_id}")
+def get_governed_action(action_id: str):
+    """Retrieves a governed action by ID."""
+    action = action_governor.get_action(action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail=f"Governed action '{action_id}' not found")
+    return action
+
+@router.get("/incidents/{incident_id}/actions")
+def list_incident_actions(incident_id: str):
+    """Lists all governed actions proposed for an incident."""
+    return action_governor.list_incident_actions(incident_id)
+
+@router.get("/audit-logs")
+def list_audit_logs(limit: int = 50):
+    """Retrieves the immutable append-only audit trail logs from PostgreSQL."""
+    return action_governor.list_audit_logs(limit=limit)
+
 
