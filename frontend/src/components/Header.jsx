@@ -1,7 +1,9 @@
 import React from 'react';
 
-export default function Header({ activeTab, onTabChange, stats, aiStatus, incidentsCount, onRefresh }) {
-  const isGemini = aiStatus?.configured;
+export default function Header({ activeTab, onTabChange, health, stats, aiStatus, incidentsCount, onRefresh }) {
+  const isRazorpayConfigured = Boolean(health?.razorpay_configured);
+  const isPostgresHealthy = health?.status === 'healthy' || health?.database === 'PostgreSQL';
+  const isGeminiConfigured = Boolean(health?.gemini_configured ?? aiStatus?.configured);
   const geminiModel = aiStatus?.model || 'gemini-3.5-flash-lite';
 
   return (
@@ -23,7 +25,7 @@ export default function Header({ activeTab, onTabChange, stats, aiStatus, incide
         margin: '0 auto'
       }}>
         
-        {/* Left: Branding */}
+        {/* Left: Branding & Tagline */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{
             width: '34px',
@@ -43,7 +45,7 @@ export default function Header({ activeTab, onTabChange, stats, aiStatus, incide
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '1.1rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#fff' }}>
-                MONEYOPS AI
+                MoneyOps AI
               </span>
               <span style={{ 
                 fontSize: '10px', 
@@ -57,7 +59,7 @@ export default function Header({ activeTab, onTabChange, stats, aiStatus, incide
               </span>
             </div>
             <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, fontWeight: 500 }}>
-              AI Payment Incident Investigator
+              Financial Incident Investigator
             </p>
           </div>
         </div>
@@ -140,8 +142,8 @@ export default function Header({ activeTab, onTabChange, stats, aiStatus, incide
           </button>
         </nav>
 
-        {/* Right: Status Indicators & Refresh */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* Right: Live Connection Indicators */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           
           {/* Razorpay Indicator */}
           <div style={{
@@ -150,13 +152,13 @@ export default function Header({ activeTab, onTabChange, stats, aiStatus, incide
             gap: '6px',
             padding: '5px 10px',
             borderRadius: '6px',
-            background: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid var(--border)',
+            background: isRazorpayConfigured ? 'rgba(59, 130, 246, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+            border: `1px solid ${isRazorpayConfigured ? 'rgba(59, 130, 246, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
             fontSize: '11px',
-            color: 'var(--text-muted)'
+            color: isRazorpayConfigured ? '#60a5fa' : '#fbbf24'
           }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#3b82f6' }}></span>
-            <span>Razorpay: <strong>Test Mode</strong></span>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isRazorpayConfigured ? '#3b82f6' : '#f59e0b' }}></span>
+            <span>Razorpay: <strong>{isRazorpayConfigured ? 'Test Mode' : 'Keys Needed'}</strong></span>
           </div>
 
           {/* PostgreSQL Indicator */}
@@ -166,13 +168,13 @@ export default function Header({ activeTab, onTabChange, stats, aiStatus, incide
             gap: '6px',
             padding: '5px 10px',
             borderRadius: '6px',
-            background: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid var(--border)',
+            background: isPostgresHealthy ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+            border: `1px solid ${isPostgresHealthy ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
             fontSize: '11px',
-            color: 'var(--text-muted)'
+            color: isPostgresHealthy ? '#10b981' : '#f87171'
           }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981' }}></span>
-            <span>PostgreSQL: <strong>{stats?.payments ? `${stats.payments} txs` : 'Connected'}</strong></span>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isPostgresHealthy ? '#10b981' : '#ef4444' }}></span>
+            <span>PostgreSQL: <strong>{stats?.payments ? `${stats.payments} txs` : (isPostgresHealthy ? 'Connected' : 'Offline')}</strong></span>
           </div>
 
           {/* Gemini Indicator */}
@@ -182,17 +184,17 @@ export default function Header({ activeTab, onTabChange, stats, aiStatus, incide
             gap: '6px',
             padding: '5px 12px',
             borderRadius: '20px',
-            background: isGemini ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-            border: `1px solid ${isGemini ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+            background: isGeminiConfigured ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+            border: `1px solid ${isGeminiConfigured ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
             fontSize: '11px',
             fontWeight: '700',
-            color: isGemini ? '#10b981' : '#f87171'
+            color: isGeminiConfigured ? '#10b981' : '#f87171'
           }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isGemini ? '#10b981' : '#f87171' }}></span>
-            <span>AI: {isGemini ? `Gemini (${geminiModel})` : 'AI OFFLINE'}</span>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isGeminiConfigured ? '#10b981' : '#f87171' }}></span>
+            <span>Gemini: {isGeminiConfigured ? `${geminiModel}` : 'Offline'}</span>
           </div>
 
-          {/* Refresh Trigger */}
+          {/* Refresh Button */}
           <button 
             onClick={onRefresh}
             title="Refresh All Data"

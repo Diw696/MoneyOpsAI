@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  fetchStats, 
   fetchSourceStats, 
   syncRazorpay, 
   fetchPayments, 
@@ -61,7 +60,7 @@ export default function DataView({ onRefreshAll }) {
       if (res.status === 'success') {
         setSyncMsg({
           type: 'success',
-          text: `✓ Synchronized ${res.payments_fetched} payments and ${res.orders_fetched} orders from live Razorpay Test Mode API.`
+          text: `✓ Synchronized ${res.payments_fetched} payments, ${res.orders_fetched} orders, and ${res.refunds_fetched} refunds from Razorpay Test API. Database updated: ${res.payments_upserted} payments upserted.`
         });
       } else if (res.status === 'credentials_required') {
         setSyncMsg({
@@ -75,7 +74,7 @@ export default function DataView({ onRefreshAll }) {
     } catch (e) {
       setSyncMsg({
         type: 'error',
-        text: `Sync error: ${e.message}`
+        text: `Razorpay sync failed: ${e.message}`
       });
     } finally {
       setSyncing(false);
@@ -92,17 +91,39 @@ export default function DataView({ onRefreshAll }) {
   const labRefunds = sourceStats?.refunds?.incident_lab || 0;
   const labWebhooks = sourceStats?.webhooks?.incident_lab || 0;
 
+  const formatSourceBadge = (src) => {
+    if (src === 'razorpay_test') {
+      return (
+        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+          RAZORPAY TEST
+        </span>
+      );
+    }
+    if (src === 'razorpay_webhook') {
+      return (
+        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+          RAZORPAY WEBHOOK
+        </span>
+      );
+    }
+    return (
+      <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
+        INCIDENT LAB
+      </span>
+    );
+  };
+
   return (
     <div className="view-container" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       
-      {/* 1. TOP SYNC CONTROLS */}
+      {/* 1. TOP HEADER & SYNC CONTROLS */}
       <div className="card" style={{ padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h2 style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)', margin: 0 }}>
-            Forensic Data Provenance & Ledger
+            Data Sources & Provenance Ledger
           </h2>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-            Inspect every transaction ingested into PostgreSQL 18 with explicit provenance tags.
+            Inspect every financial record in PostgreSQL 18 with explicit provenance separation.
           </p>
         </div>
 
@@ -112,7 +133,7 @@ export default function DataView({ onRefreshAll }) {
           disabled={syncing}
           style={{ padding: '10px 20px', fontWeight: '700', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}
         >
-          {syncing ? '↻ Contacting Razorpay...' : '⚡ Sync Live Razorpay Test Mode'}
+          {syncing ? '↻ Contacting Razorpay...' : '⚡ Sync Razorpay'}
         </button>
       </div>
 
@@ -129,14 +150,14 @@ export default function DataView({ onRefreshAll }) {
         </div>
       )}
 
-      {/* 2. PROVENANCE SOURCE SUMMARY CARDS */}
+      {/* 2. EXPLICIT PROVENANCE SUMMARY */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
         
-        {/* Real Razorpay Test Mode Box */}
+        {/* Real Razorpay Box */}
         <div className="card" style={{ padding: '20px 24px', border: '1px solid rgba(59, 130, 246, 0.3)', background: 'rgba(59, 130, 246, 0.02)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>
-              REAL RAZORPAY TEST MODE
+              REAL DATA (RAZORPAY TEST MODE)
             </span>
             <code style={{ fontSize: '11px', color: 'var(--text-muted)' }}>source: razorpay_test / webhook</code>
           </div>
@@ -164,7 +185,7 @@ export default function DataView({ onRefreshAll }) {
         <div className="card" style={{ padding: '20px 24px', border: '1px solid rgba(168, 85, 247, 0.3)', background: 'rgba(168, 85, 247, 0.02)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc' }}>
-              INCIDENT LAB (SIMULATION)
+              SIMULATION (INCIDENT LAB)
             </span>
             <code style={{ fontSize: '11px', color: 'var(--text-muted)' }}>source: incident_lab</code>
           </div>
@@ -190,10 +211,10 @@ export default function DataView({ onRefreshAll }) {
 
       </div>
 
-      {/* 3. TABBED DATA EXPLORER */}
+      {/* 3. CLEAN READABLE TABLES */}
       <div className="card" style={{ padding: '24px' }}>
         
-        {/* Table Selector & Filter Bar */}
+        {/* Table Tab Selector & Filter */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
           <div style={{ display: 'flex', gap: '8px' }}>
             {['payments', 'orders', 'refunds', 'webhooks'].map((tab) => (
@@ -219,7 +240,7 @@ export default function DataView({ onRefreshAll }) {
 
           {activeTable !== 'webhooks' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Filter Provenance:</span>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Filter Source:</span>
               <select
                 value={sourceFilter}
                 onChange={(e) => setSourceFilter(e.target.value)}
@@ -240,7 +261,7 @@ export default function DataView({ onRefreshAll }) {
           )}
         </div>
 
-        {/* Table Content */}
+        {/* Table Rows */}
         {loading ? (
           <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
             <span className="spinner"></span> Loading {activeTable} from PostgreSQL...
@@ -256,46 +277,45 @@ export default function DataView({ onRefreshAll }) {
                 <tr style={{ borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--text-muted)' }}>
                   {activeTable === 'payments' && (
                     <>
-                      <th style={{ padding: '10px 12px' }}>PAYMENT ID</th>
-                      <th style={{ padding: '10px 12px' }}>ORDER ID</th>
+                      <th style={{ padding: '10px 12px' }}>ID</th>
+                      <th style={{ padding: '10px 12px' }}>ORDER</th>
                       <th style={{ padding: '10px 12px' }}>MERCHANT</th>
-                      <th style={{ padding: '10px 12px' }}>AMOUNT (INR)</th>
+                      <th style={{ padding: '10px 12px' }}>AMOUNT</th>
                       <th style={{ padding: '10px 12px' }}>GATEWAY</th>
                       <th style={{ padding: '10px 12px' }}>STATUS</th>
-                      <th style={{ padding: '10px 12px' }}>ERROR CODE</th>
                       <th style={{ padding: '10px 12px' }}>SOURCE</th>
-                      <th style={{ padding: '10px 12px' }}>CREATED AT</th>
+                      <th style={{ padding: '10px 12px' }}>TIMESTAMP</th>
                     </>
                   )}
                   {activeTable === 'orders' && (
                     <>
-                      <th style={{ padding: '10px 12px' }}>ORDER ID</th>
+                      <th style={{ padding: '10px 12px' }}>ID</th>
                       <th style={{ padding: '10px 12px' }}>MERCHANT</th>
-                      <th style={{ padding: '10px 12px' }}>AMOUNT (INR)</th>
+                      <th style={{ padding: '10px 12px' }}>AMOUNT</th>
                       <th style={{ padding: '10px 12px' }}>STATUS</th>
                       <th style={{ padding: '10px 12px' }}>SOURCE</th>
-                      <th style={{ padding: '10px 12px' }}>CREATED AT</th>
+                      <th style={{ padding: '10px 12px' }}>TIMESTAMP</th>
                     </>
                   )}
                   {activeTable === 'refunds' && (
                     <>
-                      <th style={{ padding: '10px 12px' }}>REFUND ID</th>
-                      <th style={{ padding: '10px 12px' }}>PAYMENT ID</th>
+                      <th style={{ padding: '10px 12px' }}>ID</th>
+                      <th style={{ padding: '10px 12px' }}>PAYMENT</th>
                       <th style={{ padding: '10px 12px' }}>MERCHANT</th>
-                      <th style={{ padding: '10px 12px' }}>AMOUNT (INR)</th>
+                      <th style={{ padding: '10px 12px' }}>AMOUNT</th>
                       <th style={{ padding: '10px 12px' }}>STATUS</th>
                       <th style={{ padding: '10px 12px' }}>SOURCE</th>
-                      <th style={{ padding: '10px 12px' }}>CREATED AT</th>
+                      <th style={{ padding: '10px 12px' }}>TIMESTAMP</th>
                     </>
                   )}
                   {activeTable === 'webhooks' && (
                     <>
                       <th style={{ padding: '10px 12px' }}>EVENT ID</th>
                       <th style={{ padding: '10px 12px' }}>EVENT TYPE</th>
-                      <th style={{ padding: '10px 12px' }}>ENTITY ID</th>
-                      <th style={{ padding: '10px 12px' }}>SIGNATURE STATUS</th>
+                      <th style={{ padding: '10px 12px' }}>ENTITY</th>
+                      <th style={{ padding: '10px 12px' }}>SIGNATURE</th>
                       <th style={{ padding: '10px 12px' }}>SOURCE</th>
-                      <th style={{ padding: '10px 12px' }}>RECEIVED AT</th>
+                      <th style={{ padding: '10px 12px' }}>TIMESTAMP</th>
                     </>
                   )}
                 </tr>
@@ -322,12 +342,7 @@ export default function DataView({ onRefreshAll }) {
                             {row.status}
                           </span>
                         </td>
-                        <td style={{ padding: '10px 12px', color: row.failure_code ? '#f87171' : 'var(--text-muted)' }}>
-                          {row.failure_code || '—'}
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <code style={{ fontSize: '11px', color: row.source === 'incident_lab' ? '#c084fc' : '#60a5fa' }}>{row.source}</code>
-                        </td>
+                        <td style={{ padding: '10px 12px' }}>{formatSourceBadge(row.source)}</td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{new Date(row.created_at).toLocaleString()}</td>
                       </>
                     )}
@@ -342,9 +357,7 @@ export default function DataView({ onRefreshAll }) {
                             {row.status}
                           </span>
                         </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <code style={{ fontSize: '11px', color: row.source === 'incident_lab' ? '#c084fc' : '#60a5fa' }}>{row.source}</code>
-                        </td>
+                        <td style={{ padding: '10px 12px' }}>{formatSourceBadge(row.source)}</td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{new Date(row.created_at).toLocaleString()}</td>
                       </>
                     )}
@@ -360,9 +373,7 @@ export default function DataView({ onRefreshAll }) {
                             {row.status}
                           </span>
                         </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <code style={{ fontSize: '11px', color: row.source === 'incident_lab' ? '#c084fc' : '#60a5fa' }}>{row.source}</code>
-                        </td>
+                        <td style={{ padding: '10px 12px' }}>{formatSourceBadge(row.source)}</td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{new Date(row.created_at).toLocaleString()}</td>
                       </>
                     )}
@@ -377,9 +388,7 @@ export default function DataView({ onRefreshAll }) {
                             {row.signature_verified ? '✓ HMAC Verified' : 'Standard'}
                           </span>
                         </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <code style={{ fontSize: '11px', color: row.source === 'incident_lab' ? '#c084fc' : '#60a5fa' }}>{row.source || 'razorpay_webhook'}</code>
-                        </td>
+                        <td style={{ padding: '10px 12px' }}>{formatSourceBadge(row.source || 'razorpay_webhook')}</td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{new Date(row.received_at).toLocaleString()}</td>
                       </>
                     )}

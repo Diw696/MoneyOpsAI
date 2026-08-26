@@ -167,6 +167,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
   const topErrors = incident.evidence?.top_failure_code_count ?? (incident.evidence?.top_failure_code_share_pct ? `${incident.evidence.top_failure_code_share_pct}%` : '—');
   const totalFailed = incident.evidence?.failed_payments_count ?? (incident.affected_payments || 0);
   const exposureAmt = investigationData?.estimated_exposure ?? (incident.potential_exposure || 0);
+  const merchantCount = incident.affected_merchants || (investigationData?.affected_entities_json ? JSON.parse(investigationData.affected_entities_json).length : 10);
 
   let affectedMerchantsList = [];
   if (investigationData?.affected_entities_json) {
@@ -237,7 +238,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
           {/* What Happened */}
           <div>
             <div style={{ fontSize: '12px', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
-              1. What Happened?
+              What Happened
             </div>
             <p style={{ margin: 0, fontSize: '15px', lineHeight: '1.6', color: 'var(--text)' }}>
               {investigationData?.what_happened || incident.description}
@@ -249,7 +250,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
           {/* Why Did It Happen */}
           <div>
             <div style={{ fontSize: '12px', fontWeight: '800', color: '#facc15', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
-              2. Why Did It Happen? (Root Cause)
+              Why Did It Happen?
             </div>
             <p style={{ margin: 0, fontSize: '15px', lineHeight: '1.6', color: 'var(--text)' }}>
               {investigationData?.why_it_happened || incident.primary_signal || "Click 'Investigate with Gemini' to execute multi-turn tool calling across PostgreSQL."}
@@ -259,12 +260,12 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
         </div>
       </div>
 
-      {/* 3. FOUR CORE EVIDENCE CARDS */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+      {/* 3. FIVE CORE EVIDENCE CARDS */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
         
         <div className="card" style={{ padding: '18px 20px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>FAILURE RATE</div>
-          <div style={{ fontSize: '26px', fontWeight: '800', color: '#f87171', marginTop: '6px' }}>
+          <div style={{ fontSize: '24px', fontWeight: '800', color: '#f87171', marginTop: '6px' }}>
             {failureRate}%
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
@@ -274,17 +275,17 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
 
         <div className="card" style={{ padding: '18px 20px' }}>
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>PEER BASELINE</div>
-          <div style={{ fontSize: '26px', fontWeight: '800', color: 'var(--text)', marginTop: '6px' }}>
+          <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text)', marginTop: '6px' }}>
             {peerRate}%
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            SBI, ICICI, Axis, HDFC average
+            Healthy peer average
           </div>
         </div>
 
         <div className="card" style={{ padding: '18px 20px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>TIMEOUT FAILURES</div>
-          <div style={{ fontSize: '26px', fontWeight: '800', color: 'var(--text)', marginTop: '6px' }}>
+          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>GATEWAY TIMEOUTS</div>
+          <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text)', marginTop: '6px' }}>
             {topErrors} / {totalFailed}
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
@@ -293,12 +294,22 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
         </div>
 
         <div className="card" style={{ padding: '18px 20px' }}>
+          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>AFFECTED MERCHANTS</div>
+          <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text)', marginTop: '6px' }}>
+            {merchantCount}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+            Impacted across categories
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '18px 20px' }}>
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>POTENTIAL EXPOSURE</div>
-          <div style={{ fontSize: '26px', fontWeight: '800', color: '#f87171', marginTop: '6px' }}>
+          <div style={{ fontSize: '24px', fontWeight: '800', color: '#f87171', marginTop: '6px' }}>
             ₹{Number(exposureAmt).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Unresolved transaction exposure
+            Unresolved transaction value
           </div>
         </div>
 
@@ -309,7 +320,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <span style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text)' }}>
-              👥 Affected Merchants: <strong>{incident.affected_merchants || 10} merchants</strong>
+              👥 Affected Merchants: <strong>{merchantCount} merchants</strong>
             </span>
             <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '12px' }}>
               Impacted across SaaS, Gaming, Travel, and Quick Commerce
@@ -346,10 +357,15 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
 
       {/* 5. AI RECOMMENDATION */}
       <div className="card" style={{ padding: '24px', border: '1px solid rgba(16, 185, 129, 0.3)', background: 'rgba(16, 185, 129, 0.02)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-          <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
-            AI RECOMMENDATION
-          </span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
+              AI RECOMMENDATION
+            </span>
+            <span style={{ fontSize: '11px', color: '#facc15', fontWeight: '600' }}>
+              (AI-generated recommendation • Human approval required)
+            </span>
+          </div>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
             Confidence: <strong style={{ color: '#10b981' }}>{((investigationData?.confidence || 0.99) * 100).toFixed(0)}%</strong>
           </span>
@@ -359,12 +375,12 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
         </p>
       </div>
 
-      {/* 6. ACTION GOVERNOR & HUMAN-IN-THE-LOOP */}
+      {/* 6. ACTION GOVERNOR */}
       <div className="card" style={{ padding: '24px', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.02)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
           <div>
             <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.4)' }}>
-              RISK: RED • HUMAN AUTHORIZATION REQUIRED
+              Risk: RED • Awaiting human approval
             </span>
           </div>
 
@@ -379,7 +395,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
               border: '1px solid var(--border)',
               textTransform: 'uppercase'
             }}>
-              {primaryAction.status === 'executed' ? 'EXECUTED — SIMULATION' : primaryAction.status === 'approved' ? 'APPROVED BY HUMAN' : primaryAction.status === 'rejected' ? 'REJECTED' : 'PENDING APPROVAL'}
+              {primaryAction.status === 'executed' ? 'EXECUTED — SIMULATION ONLY' : primaryAction.status === 'approved' ? 'APPROVED BY HUMAN' : primaryAction.status === 'rejected' ? 'REJECTED' : 'PENDING APPROVAL'}
             </span>
           )}
         </div>
@@ -389,7 +405,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
             Reroute traffic away from <code style={{ color: '#f87171' }}>{incident.target_entity_id || 'Gateway_X'}</code>
           </div>
           <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '14px' }}>
-            <strong>Why:</strong> 74/87 failures are <code style={{ color: 'var(--primary)' }}>GATEWAY_TIMEOUT</code> • 19.08% failure rate • 5.42x peer baseline.
+            <strong>Why:</strong> High failure concentration on Gateway_X ({failureRate}%) relative to peer baseline ({peerRate}%).
           </div>
 
           {/* Action Control Buttons */}
@@ -403,7 +419,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
                     disabled={actionLoading}
                     style={{ background: '#10b981', borderColor: '#10b981', padding: '9px 20px', fontWeight: '700' }}
                   >
-                    ✓ APPROVE ACTION
+                    ✓ Approve Action
                   </button>
                   <button 
                     className="btn"
@@ -411,7 +427,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
                     disabled={actionLoading}
                     style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '9px 18px', fontWeight: '600' }}
                   >
-                    ✕ REJECT
+                    ✕ Reject
                   </button>
                 </>
               )}
@@ -423,7 +439,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
                   disabled={actionLoading}
                   style={{ background: '#3b82f6', borderColor: '#3b82f6', padding: '9px 22px', fontWeight: '700' }}
                 >
-                  ⚡ EXECUTE SAFE SIMULATION
+                  ⚡ Execute Safe Simulation
                 </button>
               )}
 
@@ -434,12 +450,12 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
                     <span>•</span>
                     <span>✓ Safe simulation executed</span>
                     <span>•</span>
-                    <span>✓ Audit recorded</span>
+                    <span>✓ Audit log recorded</span>
                   </div>
 
                   <div style={{ marginTop: '6px', padding: '12px 14px', background: '#0f172a', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }}>
                     <div style={{ color: '#38bdf8', fontWeight: '700', marginBottom: '4px' }}>
-                      Simulation Result: {primaryAction.execution_result?.message || "Traffic diversion simulation completed successfully."}
+                      SIMULATION ONLY: {primaryAction.execution_result?.message || "Traffic diversion simulation completed successfully."}
                     </div>
                     <div style={{ color: '#10b981', fontWeight: '600' }}>
                       0 live Razorpay payments modified.
@@ -472,7 +488,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
       <div className="card" style={{ padding: '20px 24px' }}>
         <details style={{ cursor: 'pointer' }}>
           <summary style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span>🛠️ AI Investigation Trace ({steps.length} tool calls executed against PostgreSQL)</span>
+            <span>View AI investigation trace ({steps.length} tool calls executed against PostgreSQL)</span>
             <span style={{ fontSize: '12px', color: 'var(--primary)' }}>Toggle Details</span>
           </summary>
 
@@ -510,13 +526,13 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
                   {expandedStep === idx && (
                     <div style={{ padding: '12px 14px', background: 'rgba(0, 0, 0, 0.2)', borderTop: '1px solid var(--border)', fontSize: '12px' }}>
                       <div style={{ marginBottom: '8px' }}>
-                        <strong style={{ color: 'var(--text-muted)' }}>Tool Arguments:</strong>
+                        <strong style={{ color: 'var(--text-muted)' }}>Input Arguments:</strong>
                         <pre style={{ margin: '4px 0', padding: '8px', background: '#0f172a', borderRadius: '4px', overflowX: 'auto' }}>
                           {JSON.stringify(st.arguments || st.input_json, null, 2)}
                         </pre>
                       </div>
                       <div>
-                        <strong style={{ color: 'var(--text-muted)' }}>Database Result:</strong>
+                        <strong style={{ color: 'var(--text-muted)' }}>Database Output:</strong>
                         <pre style={{ margin: '4px 0', padding: '8px', background: '#0f172a', borderRadius: '4px', overflowX: 'auto', maxHeight: '200px' }}>
                           {JSON.stringify(st.result || st.output_json, null, 2)}
                         </pre>

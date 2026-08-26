@@ -13,13 +13,13 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
         {/* Card 1: Transactions */}
         <div className="card" style={{ padding: '20px' }}>
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Total Transactions
+            Transactions
           </div>
           <div style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text)', marginTop: '8px' }}>
             {(stats?.payments || 0).toLocaleString('en-IN')}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Ingested into PostgreSQL 18
+            Ingested in PostgreSQL 18
           </div>
         </div>
 
@@ -32,7 +32,7 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
             {incidents.length > 0 ? totalFailed.toLocaleString('en-IN') : 0}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {incidents.length > 0 ? 'Elevated rejection velocity' : 'Within normal operational tolerance'}
+            {incidents.length > 0 ? 'Anomalous failure volume' : 'Within normal operational baselines'}
           </div>
         </div>
 
@@ -45,7 +45,7 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
             {incidents.length}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {incidents.length > 0 ? 'Unsupervised ML Anomaly Flagged' : 'All systems operating normally'}
+            {incidents.length > 0 ? 'Discovered by IsolationForest' : 'All systems operating normally'}
           </div>
         </div>
 
@@ -58,18 +58,18 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
             ₹{totalExposure.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Unresolved failed volume
+            Unresolved transaction value
           </div>
         </div>
 
       </div>
 
-      {/* 2. ACTIVE INCIDENT QUEUE */}
+      {/* 2. ACTIVE INCIDENTS SECTION */}
       <div className="card" style={{ padding: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
           <div>
             <h2 style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)', margin: 0 }}>
-              Active Incident Queue
+              Active Incidents
             </h2>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
               Incidents discovered via dynamic feature extraction and IsolationForest anomaly detection.
@@ -93,7 +93,7 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
           </button>
         </div>
 
-        {/* Incident Cards List */}
+        {/* Incident List / Clean Empty State */}
         {incidents.length === 0 ? (
           <div style={{ 
             padding: '48px 24px', 
@@ -105,10 +105,10 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
           }}>
             <div style={{ fontSize: '24px', marginBottom: '8px' }}>✓</div>
             <div style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text)' }}>
-              All systems operating normally.
+              No active incidents
             </div>
             <div style={{ fontSize: '13px', marginTop: '4px' }}>
-              Zero anomalies detected across all banking gateways and merchant channels.
+              MoneyOps is not currently detecting abnormal payment behavior across any banking node or merchant channel.
             </div>
           </div>
         ) : (
@@ -144,7 +144,7 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
                         </span>
                         <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>•</span>
                         <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                          Source: <code style={{ color: 'var(--primary)' }}>{inc.source || 'incident_lab'}</code>
+                          Detected: {new Date(inc.detected_at).toLocaleString()}
                         </span>
                       </div>
                       <h3 style={{ fontSize: '17px', fontWeight: '700', color: 'var(--text)', margin: 0 }}>
@@ -164,7 +164,7 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
                         gap: '8px' 
                       }}
                     >
-                      ⚡ Investigate Incident
+                      ⚡ Investigate
                     </button>
                   </div>
 
@@ -191,7 +191,7 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>FAILED VOLUME</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>AFFECTED PAYMENTS</div>
                       <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text)' }}>
                         {failedCount} failures
                       </div>
@@ -204,7 +204,7 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
                     </div>
                   </div>
 
-                  {/* Primary Signal Note */}
+                  {/* Primary Signal */}
                   {inc.primary_signal && (
                     <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
                       <strong style={{ color: 'var(--text)' }}>Signal:</strong> {inc.primary_signal}

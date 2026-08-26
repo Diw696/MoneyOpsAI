@@ -4,6 +4,7 @@ import OverviewView from './components/OverviewView';
 import DataView from './components/DataView';
 import InvestigationView from './components/InvestigationView';
 import { 
+  fetchHealth,
   fetchStats, 
   fetchIncidents, 
   fetchIncidentDetail, 
@@ -13,6 +14,7 @@ import {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'data' | 'investigation'
+  const [health, setHealth] = useState(null);
   const [stats, setStats] = useState(null);
   const [aiStatus, setAiStatus] = useState({ provider: 'gemini', configured: false, model: 'gemini-3.5-flash-lite' });
   const [incidents, setIncidents] = useState([]);
@@ -22,12 +24,14 @@ export default function App() {
 
   const loadData = async () => {
     try {
-      const [sData, incList, aiInfo] = await Promise.all([
+      const [hData, sData, incList, aiInfo] = await Promise.all([
+        fetchHealth().catch(() => ({ status: "offline", database: "PostgreSQL", razorpay_configured: false, gemini_configured: false })),
         fetchStats().catch(() => null),
         fetchIncidents().catch(() => []),
         fetchAIStatus().catch(() => ({ provider: 'gemini', configured: false, model: 'gemini-3.5-flash-lite' }))
       ]);
 
+      setHealth(hData);
       setStats(sData);
       setIncidents(incList || []);
       setAiStatus(aiInfo || { provider: 'gemini', configured: false, model: 'gemini-3.5-flash-lite' });
@@ -91,6 +95,7 @@ export default function App() {
       <Header 
         activeTab={activeTab} 
         onTabChange={setActiveTab} 
+        health={health}
         stats={stats} 
         aiStatus={aiStatus} 
         incidentsCount={incidents.length} 

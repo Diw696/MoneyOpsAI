@@ -1,5 +1,11 @@
 const API_BASE = "http://localhost:8000/api";
 
+export async function fetchHealth() {
+  const res = await fetch(`${API_BASE}/health`);
+  if (!res.ok) throw new Error("Failed to fetch system health");
+  return res.json();
+}
+
 export async function fetchAIStatus() {
   const res = await fetch(`${API_BASE}/ai/status`);
   if (!res.ok) throw new Error("Failed to fetch AI status");
