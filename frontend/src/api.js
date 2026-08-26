@@ -1,4 +1,7 @@
-const API_BASE = "http://localhost:8000/api";
+const API_BASE = typeof window !== 'undefined' && window.location.hostname === '127.0.0.1' 
+  ? 'http://127.0.0.1:8000/api' 
+  : 'http://localhost:8000/api';
+
 
 export async function fetchHealth() {
   const res = await fetch(`${API_BASE}/health`);
@@ -189,4 +192,11 @@ export async function fetchWebhooks(limit = 50) {
   if (!res.ok) throw new Error("Failed to fetch webhooks");
   return res.json();
 }
+
+export async function fetchSimilarIncidents(incidentId) {
+  const res = await fetch(`${API_BASE}/incidents/${incidentId}/similar`);
+  if (!res.ok) throw new Error("Failed to fetch similar incidents");
+  return res.json();
+}
+
 

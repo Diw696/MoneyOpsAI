@@ -140,7 +140,29 @@ export default function Header({ activeTab, onTabChange, health, stats, aiStatus
               </span>
             )}
           </button>
+
+          <button
+            onClick={() => onTabChange('audit')}
+            style={{
+              padding: '7px 18px',
+              borderRadius: '6px',
+              border: 'none',
+              background: activeTab === 'audit' ? 'var(--primary)' : 'transparent',
+              color: activeTab === 'audit' ? '#fff' : 'var(--text-muted)',
+              fontSize: '13px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <span>📝</span>
+            <span>Audit</span>
+          </button>
         </nav>
+
 
         {/* Right: Live Connection Indicators */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>

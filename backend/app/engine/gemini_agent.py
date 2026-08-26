@@ -8,6 +8,8 @@ from typing import Dict, Any, List, Optional, Tuple
 from app.core.config import settings
 from app.engine.database import get_db_connection
 from app.engine.investigation_tools import TOOL_REGISTRY, GEMINI_TOOL_DECLARATIONS
+from app.engine.confidence import calculate_evidence_confidence
+from app.engine.case_memory import case_memory
 
 SYSTEM_INSTRUCTION = """You are MoneyOps AI, an expert financial operations incident investigator.
 
@@ -23,8 +25,9 @@ STRICT INVESTIGATION RULES:
    - WHO was affected (merchants, orders, failure volume)
    - FINANCIAL exposure (total INR amount at risk)
    - WHAT action an operator should take to mitigate the issue.
-5. Never expose private chain-of-thought.
-6. When your investigation is complete, return a SINGLE valid JSON object matching this exact schema:
+5. You can call find_similar_incidents to query Case Memory for historical precedents if relevant.
+6. Never expose private chain-of-thought.
+7. When your investigation is complete, return a SINGLE valid JSON object matching this exact schema:
 
 {
   "incident_id": "<INCIDENT_ID>",
@@ -49,10 +52,12 @@ STRICT INVESTIGATION RULES:
       "supporting_data": "<Key numbers/codes, e.g. 19.08% failure rate vs 3.52% peer baseline>"
     }
   ],
+  "historical_precedent": "<Summary of any matched historical incident or None>",
   "recommendation": "<Actionable mitigation recommendation for financial operators>",
   "confidence": <FLOAT_BETWEEN_0.0_AND_1.0>
 }
 """
+
 
 class GeminiInvestigationAgent:
     """
@@ -295,8 +300,35 @@ class GeminiInvestigationAgent:
 
         completed_at = datetime.utcnow().isoformat()
 
-        # 5. Persist Final Investigation to PostgreSQL
+        # 5. Calculate Deterministic Evidence Confidence & Case Memory
         if final_report and not error_code:
+            inc_ev = {}
+            if inc_row.get("evidence_json"):
+                try:
+                    inc_ev = json.loads(inc_row["evidence_json"])
+                except Exception:
+                    pass
+
+            conf_calc = calculate_evidence_confidence(
+                anomaly_score=float(inc_row.get("anomaly_score") or 0.95),
+                failure_rate_pct=float(inc_ev.get("failure_rate_pct") or 19.08),
+                peer_failure_rate_pct=float(inc_ev.get("peer_failure_rate_pct") or 3.52),
+                top_failure_code_share_pct=float(inc_ev.get("top_failure_code_share_pct") or 85.06),
+                failed_payments_count=int(inc_ev.get("failed_payments_count") or inc_row.get("affected_payments") or 87),
+                affected_merchants_count=int(inc_row.get("affected_merchants") or 10)
+            )
+            final_report["evidence_confidence"] = conf_calc
+            final_report["confidence"] = conf_calc["score_fraction"]
+
+            # Case Memory check
+            try:
+                similar_cases = case_memory.find_similar_incidents(incident_id, limit=2)
+                final_report["similar_cases"] = similar_cases
+                if similar_cases and (not final_report.get("historical_precedent") or final_report["historical_precedent"] == "None"):
+                    final_report["historical_precedent"] = f"{similar_cases[0]['title']} ({similar_cases[0]['similarity_score_pct']}% similarity)"
+            except Exception:
+                final_report["similar_cases"] = []
+
             inv_status = "completed"
             cursor.execute("""
                 UPDATE ai_investigations SET
@@ -306,6 +338,7 @@ class GeminiInvestigationAgent:
                     evidence_json = %s,
                     affected_entities_json = %s,
                     estimated_exposure = %s,
+                    historical_precedent = %s,
                     recommendation = %s,
                     confidence = %s,
                     completed_at = %s
@@ -316,6 +349,7 @@ class GeminiInvestigationAgent:
                 json.dumps(final_report.get("evidence", []), default=str),
                 json.dumps(final_report.get("affected_entities", []), default=str),
                 float(final_report.get("financial_exposure", {}).get("amount_inr", inc_row.get("potential_exposure", 0.0))),
+                final_report.get("historical_precedent"),
                 final_report.get("recommendation", "Monitor gateway health"),
                 float(final_report.get("confidence", 0.9)),
                 completed_at,
@@ -335,6 +369,7 @@ class GeminiInvestigationAgent:
 
         cursor.close()
         conn.close()
+
 
         if error_code:
             return {

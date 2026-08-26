@@ -19,9 +19,10 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
             {(stats?.payments || 0).toLocaleString('en-IN')}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Ingested in PostgreSQL 18
+            Across connected datasets in PostgreSQL
           </div>
         </div>
+
 
         {/* Card 2: Failed Payments */}
         <div className="card" style={{ padding: '20px' }}>

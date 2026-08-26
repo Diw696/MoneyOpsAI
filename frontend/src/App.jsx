@@ -3,6 +3,7 @@ import Header from './components/Header';
 import OverviewView from './components/OverviewView';
 import DataView from './components/DataView';
 import InvestigationView from './components/InvestigationView';
+import AuditView from './components/AuditView';
 import { 
   fetchHealth,
   fetchStats, 
@@ -13,7 +14,7 @@ import {
 } from './api';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'data' | 'investigation'
+  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'data' | 'investigation' | 'audit'
   const [health, setHealth] = useState(null);
   const [stats, setStats] = useState(null);
   const [aiStatus, setAiStatus] = useState({ provider: 'gemini', configured: false, model: 'gemini-3.5-flash-lite' });
@@ -91,7 +92,7 @@ export default function App() {
   return (
     <div className="app-container" style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
       
-      {/* 1. TOP HEADER & 3-VIEW NAVIGATION */}
+      {/* 1. TOP HEADER & 4-VIEW NAVIGATION */}
       <Header 
         activeTab={activeTab} 
         onTabChange={setActiveTab} 
@@ -149,8 +150,13 @@ export default function App() {
             onRefreshAll={loadData} 
           />
         )}
+
+        {activeTab === 'audit' && (
+          <AuditView />
+        )}
       </main>
 
     </div>
   );
 }
+

@@ -150,7 +150,24 @@ export default function DataView({ onRefreshAll }) {
         </div>
       )}
 
-      {/* 2. EXPLICIT PROVENANCE SUMMARY */}
+      {/* 2. EXPLICIT PROVENANCE PURPOSE BANNER & SUMMARY */}
+      <div style={{
+        padding: '12px 18px',
+        borderRadius: '8px',
+        fontSize: '13px',
+        background: 'rgba(99, 102, 241, 0.08)',
+        border: '1px solid rgba(99, 102, 241, 0.25)',
+        color: '#c7d2fe',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px'
+      }}>
+        <span style={{ fontSize: '16px' }}>ℹ️</span>
+        <span>
+          <strong>Data Provenance Notice:</strong> Simulation data is used to reproduce high-volume financial incidents that are difficult to generate safely in Razorpay Test Mode. All records maintain immutable source tags.
+        </span>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
         
         {/* Real Razorpay Box */}
@@ -159,6 +176,7 @@ export default function DataView({ onRefreshAll }) {
             <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>
               REAL DATA (RAZORPAY TEST MODE)
             </span>
+
             <code style={{ fontSize: '11px', color: 'var(--text-muted)' }}>source: razorpay_test / webhook</code>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginTop: '10px' }}>

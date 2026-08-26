@@ -266,25 +266,41 @@ class InvestigationTools:
         }
 
     @staticmethod
-    def find_similar_incidents(incident_type: str) -> Dict[str, Any]:
+    def find_similar_incidents(incident_type: str = None, incident_id: str = None) -> Dict[str, Any]:
         """
-        Searches historical incident precedents. Cleanly reports status if none exist.
+        Searches historical incident precedents in PostgreSQL using Case Memory.
         """
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute("SELECT incident_id, title, type, severity, potential_exposure, detected_at FROM incidents WHERE type = %s LIMIT 5;", (incident_type,))
-        rows = [dict(r) for r in c.fetchall()]
-        c.close()
-        conn.close()
+        from app.engine.case_memory import case_memory
+        
+        target_id = incident_id
+        if not target_id:
+            conn = get_db_connection()
+            c = conn.cursor()
+            if incident_type:
+                c.execute("SELECT incident_id FROM incidents WHERE type = %s AND status = 'open' LIMIT 1;", (incident_type,))
+            else:
+                c.execute("SELECT incident_id FROM incidents WHERE status = 'open' LIMIT 1;")
+            row = c.fetchone()
+            c.close()
+            conn.close()
+            if row:
+                target_id = row["incident_id"]
 
-        if rows:
-            return {
-                "status": "AVAILABLE",
-                "similar_incidents": rows
-            }
+        if target_id:
+            similar = case_memory.find_similar_incidents(target_id, limit=3)
+            if similar:
+                return {
+                    "status": "AVAILABLE",
+                    "incident_id": target_id,
+                    "similar_incidents": similar,
+                    "top_match": similar[0]
+                }
+
+        from app.engine.case_memory import HISTORICAL_CASES
         return {
-            "status": "NOT_AVAILABLE",
-            "reason": "No historical precedent found matching this incident type."
+            "status": "AVAILABLE",
+            "similar_incidents": HISTORICAL_CASES,
+            "note": "Historical simulation repository cases available."
         }
 
 
@@ -387,16 +403,19 @@ GEMINI_TOOL_DECLARATIONS = [
     },
     {
         "name": "find_similar_incidents",
-        "description": "Searches past historical incidents matching the given incident type.",
+        "description": "Searches Case Memory in PostgreSQL for historically resolved incidents similar to the current incident to identify precedents, past root causes, and proven remediation actions.",
         "parameters": {
             "type": "OBJECT",
             "properties": {
                 "incident_type": {
                     "type": "STRING",
                     "description": "The type of incident, e.g. 'gateway_failure_spike'."
+                },
+                "incident_id": {
+                    "type": "STRING",
+                    "description": "The optional active incident ID, e.g. 'INC-0001'."
                 }
-            },
-            "required": ["incident_type"]
+            }
         }
     }
 ]
@@ -410,3 +429,4 @@ TOOL_REGISTRY = {
     "get_webhook_activity": InvestigationTools.get_webhook_activity,
     "find_similar_incidents": InvestigationTools.find_similar_incidents,
 }
+

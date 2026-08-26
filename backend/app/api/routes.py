@@ -438,6 +438,19 @@ def list_incident_investigations(incident_id: str):
         results.append(d)
     return results
 
+@router.get("/incidents/{incident_id}/similar")
+def get_similar_incidents(incident_id: str, limit: int = 3):
+    """
+    Retrieves historically resolved incidents from Case Memory matching the incident.
+    """
+    from app.engine.case_memory import case_memory
+    try:
+        similar = case_memory.find_similar_incidents(incident_id, limit=limit)
+        return similar
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to query Case Memory: {str(e)}")
+
+
 # =============================================================================
 # ACTION GOVERNOR & HUMAN-IN-THE-LOOP (PHASE D)
 # =============================================================================
