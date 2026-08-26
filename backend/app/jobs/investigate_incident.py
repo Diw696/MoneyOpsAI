@@ -44,14 +44,19 @@ def main():
 
     print("\n--- Investigation Execution Trace (Tool Calling Steps) ---")
     for st in res.get("steps", []):
-        print(f"  Step {st['step_number']}: Gemini → {st['tool_name']}({json.dumps(st['arguments'])}) [{st['latency_ms']}ms]")
+        print(f"  Step {st['step_number']}: Gemini -> {st['tool_name']}({json.dumps(st['arguments'])}) [{st['latency_ms']}ms]")
 
     report = res.get("report", {})
     print("\n--- Final Structured Investigation Findings ---")
-    print(f"Summary         : {report.get('summary')}")
-    print(f"What Happened   : {report.get('what_happened')}")
-    print(f"Root Cause (Why): {report.get('why')}")
-    print(f"Recommendation  : {report.get('recommendation')}")
+    def safe_str(val):
+        if not val:
+            return ""
+        return str(val).replace("\u20b9", "INR ")
+
+    print(f"Summary         : {safe_str(report.get('summary'))}")
+    print(f"What Happened   : {safe_str(report.get('what_happened'))}")
+    print(f"Root Cause (Why): {safe_str(report.get('why'))}")
+    print(f"Recommendation  : {safe_str(report.get('recommendation'))}")
     print(f"Confidence      : {report.get('confidence')}")
 
     print("\n" + "=" * 68)

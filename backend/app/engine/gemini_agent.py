@@ -234,7 +234,7 @@ class GeminiInvestigationAgent:
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s);
                     """, (
                         step_id, investigation_id, step_num, fn_name,
-                        json.dumps(fn_args), json.dumps(tool_result), datetime.utcnow().isoformat()
+                        json.dumps(fn_args, default=str), json.dumps(tool_result, default=str), datetime.utcnow().isoformat()
                     ))
                     conn.commit()
 
@@ -243,7 +243,7 @@ class GeminiInvestigationAgent:
                         "step_number": step_num,
                         "tool_name": fn_name,
                         "arguments": fn_args,
-                        "result": tool_result,
+                        "result": json.loads(json.dumps(tool_result, default=str)),
                         "latency_ms": tool_latency,
                         "status": tool_status
                     }
@@ -253,7 +253,7 @@ class GeminiInvestigationAgent:
                     response_parts.append({
                         "functionResponse": {
                             "name": fn_name,
-                            "response": {"output": tool_result}
+                            "response": {"output": json.loads(json.dumps(tool_result, default=str))}
                         }
                     })
 
@@ -313,8 +313,8 @@ class GeminiInvestigationAgent:
             """, (
                 final_report.get("what_happened", final_report.get("summary")),
                 final_report.get("why", "Derived from forensic tool execution"),
-                json.dumps(final_report.get("evidence", [])),
-                json.dumps(final_report.get("affected_entities", [])),
+                json.dumps(final_report.get("evidence", []), default=str),
+                json.dumps(final_report.get("affected_entities", []), default=str),
                 float(final_report.get("financial_exposure", {}).get("amount_inr", inc_row.get("potential_exposure", 0.0))),
                 final_report.get("recommendation", "Monitor gateway health"),
                 float(final_report.get("confidence", 0.9)),
