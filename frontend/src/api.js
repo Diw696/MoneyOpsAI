@@ -144,3 +144,43 @@ export async function generateLabData(payload = { seed: 42, payments: 2500, merc
   if (!res.ok) throw new Error("Failed to generate laboratory dataset");
   return res.json();
 }
+
+export async function syncRazorpay() {
+  const res = await fetch(`${API_BASE}/razorpay/sync`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Razorpay sync failed");
+  }
+  return res.json();
+}
+
+export async function fetchPayments(limit = 50, source = null) {
+  const url = source ? `${API_BASE}/payments?limit=${limit}&source=${source}` : `${API_BASE}/payments?limit=${limit}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch payments");
+  return res.json();
+}
+
+export async function fetchOrders(limit = 50, source = null) {
+  const url = source ? `${API_BASE}/orders?limit=${limit}&source=${source}` : `${API_BASE}/orders?limit=${limit}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch orders");
+  return res.json();
+}
+
+export async function fetchRefunds(limit = 50, source = null) {
+  const url = source ? `${API_BASE}/refunds?limit=${limit}&source=${source}` : `${API_BASE}/refunds?limit=${limit}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch refunds");
+  return res.json();
+}
+
+export async function fetchWebhooks(limit = 50) {
+  const res = await fetch(`${API_BASE}/webhooks?limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to fetch webhooks");
+  return res.json();
+}
+

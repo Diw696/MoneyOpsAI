@@ -1,163 +1,208 @@
-# MoneyOps AI ⚡
+# MoneyOps AI ⚡ (V2)
 
-### *AI-Native Financial Incident Investigation & Response Platform*
+### *Autonomous AI Financial Incident Investigator & Governed Remediation Platform*
 
-> **Tagline:** *"When money doesn't add up, MoneyOps finds out why."*
+> **Tagline:** *"When digital payment transactions fail, MoneyOps discovers why, investigates the database, and governs the response."*
 
-Built by **Diwakar Kaushik (BTech AI & Data Engineering)** for the **Razorpay Internship — Open Track AI Selection**.
+Built for high-throughput payment gateway operations (Razorpay Test Mode / FinOps Payment Ops).
 
 ---
 
 ## 📌 Executive Summary
 
-Modern digital payment platforms process millions of interconnected financial events across **Merchants**, **Orders**, **Payments**, **Refunds**, **Settlements**, **Disputes**, and **Webhooks**. When upstream gateway timeouts or webhook acknowledgement drops occur, standard reconciliation flags a mismatch, but operations teams must answer:
-- *What actually happened?*
-- *Which merchants and transactions are affected (blast radius)?*
-- *How much financial exposure is at risk?*
-- *Has this incident pattern occurred before?*
-- *What governed remediation action should be executed?*
+Modern payment operations teams at gateways and merchants process millions of financial events across **Merchants**, **Orders**, **Payments**, **Refunds**, and **Webhooks**. When upstream banking nodes degrade or timeout spikes occur, static threshold alerts trigger alert fatigue without explaining the root cause.
 
-**MoneyOps AI** sits above basic reconciliation as an autonomous **AI-Powered Incident Investigator**.
-
----
-
-## 🏛️ System Architecture
+**MoneyOps AI V2** is an autonomous FinOps incident control platform built on top of **PostgreSQL 18**, **Scikit-Learn IsolationForest**, **Google Gemini Multi-Turn Tool Calling**, and a **Centralized Action Governor**:
 
 ```text
-               SYNTHETIC WORLD                      RAZORPAY TEST MODE
-          (generate_data.py --seed 42)            (POST /api/webhooks/razorpay)
-                     │                                         │
-                     └────────────────────┬────────────────────┘
-                                          ▼
-                               CANONICAL INGESTION PIPELINE
-                     ┌─────────────────────────────────────────┐
-                     │ 1. EventValidator                       │
-                     │ 2. EventNormalizer → CanonicalEvent     │
-                     │ 3. FeatureProcessor                     │
-                     │ 4. AnomalyProcessor (Isolation Forest)  │
-                     │ 5. EventRepository                      │
-                     └────────────────────┬────────────────────┘
-                                          ▼
-                              SQLITE RELATIONAL DATABASE
-                            (13 Tables, WAL Mode, FKs)
-                                          │
-            ┌─────────────────────────────┼─────────────────────────────┐
-            ▼                             ▼                             ▼
-   MERCHANT BEHAVIORAL MEMORY        NETWORKX MONEY GRAPH          CASE MEMORY ENGINE
- (Rolling Baselines & Deviations)  (Entity Traversal & Blast)   (384-d Dense Neural Embeddings)
-            │                             │                             │
-            └─────────────────────────────┼─────────────────────────────┘
-                                          ▼
-                             FINANCIAL INVESTIGATION AGENT
-                              (Provider-Agnostic LLM ReAct)
-                       ┌───────────────────────────────────────┐
-                       │ 7 Investigative Python Tools:         │
-                       │ - get_incident                        │
-                       │ - get_payment / get_payment_graph     │
-                       │ - get_gateway_telemetry               │
-                       │ - get_merchant_profile                │
-                       │ - get_anomaly_features                │
-                       │ - find_similar_incidents              │
-                       └──────────────────┬────────────────────┘
-                                          ▼
-                             STRUCTURED INVESTIGATION REPORT
-                                (Root Cause & Evidence)
-                                          ▼
-                                ACTION GOVERNOR (3-Tier)
-                                          │
-                         ┌────────────────┴────────────────┐
-                         ▼                                 ▼
-                 [GREEN: Observe]                  [RED: Human Approval]
-                         │                                 │
-                         └────────────────┬────────────────┘
-                                          ▼
-                            IMMUTABLE AUDIT LOG (SQLite)
-                                          ▼
-                         OPERATIONS CONTROL CENTER FRONTEND
-                             (React 18 + SVG Money Graph)
+REAL RAZORPAY TEST MODE & INCIDENT LAB
+                  │
+                  ▼
+   UNIFIED CANONICAL INGESTION PIPELINE (CanonicalEvent)
+                  │
+                  ▼
+     POSTGRESQL 18 PRIMARY DATABASE (moneyops_v2)
+                  │
+                  ▼
+   UNSUPERVISED ISOLATION FOREST ANOMALY DETECTION
+                  │
+                  ▼
+         INCIDENT: INC-0001
+                  │
+                  ▼
+ AUTONOMOUS GEMINI INVESTIGATION AGENT (SQL Tools)
+                  │
+                  ▼
+    EVIDENCE-BACKED ROOT CAUSE & RECOMMENDATION
+                  │
+                  ▼
+┌─────────────────────────────────────────────────────────┐
+│        ACTION GOVERNOR & HUMAN-IN-THE-LOOP              │
+│                                                         │
+│ Policy: RISK = RED (Routing Change)                     │
+│ Unapproved Execution: ❌ BLOCKED (HTTP 400)             │
+│ Human Operator:       ✅ AUTHORIZED                     │
+│ Simulation Execution: ⚡ EXECUTED (0 real txs modified) │
+└─────────────────────────────────────────────────────────┘
+                  │
+                  ▼
+   IMMUTABLE APPEND-ONLY AUDIT TRAIL (audit_logs)
+                  │
+                  ▼
+     MINIMALIST 3-VIEW CONTROL CENTER (React 18)
+          [ OVERVIEW ]  [ DATA ]  [ INVESTIGATION ]
 ```
 
 ---
 
-## 🚀 Key Engineering Pillars
+## 🏛️ Core Engineering Pillars
 
-1. **Relational Source of Truth:** 13 SQLite tables (`WAL` mode) with explicit foreign keys and query indexes.
-2. **Reproducible Data Generation:** `python generate_data.py --seed 42` generates 25 merchants, 300 customers, 2,500+ normal transaction lifecycles, and 4 known golden demo anomalies.
-3. **Canonical Event Pipeline:** Heterogeneous events normalize to `CanonicalEvent` and pass through unified validation, anomaly scoring, persistence, and graph updates.
-4. **Merchant Behavioral Memory:** Computes rolling payment success rates, refund rates, and baseline deviations via SQL window aggregations.
-5. **Unsupervised ML Anomaly Detection:** Scikit-learn `IsolationForest` pipeline trained on 8 engineered financial features.
-6. **Cross-Entity Money Graph:** NetworkX directed graph modeling multi-hop payment lifecycles and cross-merchant gateway blast radius.
-7. **Dense Vector Semantic Case Memory:** Dense 384-dimensional neural embeddings (`SentenceTransformer all-MiniLM-L6-v2`) computing pure mathematical cosine similarity to match past incident precedents.
-8. **Provider-Agnostic AI Agent:** Autonomous ReAct tool-calling loop supporting Anthropic Claude, Local LLMs (Ollama/vLLM), and a deterministic fallback that derives exposure from live query results.
-9. **Three-Tier Action Governor:** Enforces policy safety (Green/Yellow/Red) requiring explicit human authorization for state-mutating recovery actions.
-10. **Immutable Audit Ledger:** Automatically records forensic evidence, actor authorization, and simulated outcomes with unique audit IDs (e.g. `ACT-5B0A49B6`).
-11. **Real Razorpay Test Mode Ingestion:** Validates HMAC-SHA256 signatures (`X-Razorpay-Signature`) and routes live webhooks into the canonical pipeline.
+1. **Production PostgreSQL 18 Architecture:**
+   - 10 structured tables (`merchants`, `orders`, `payments`, `refunds`, `webhook_events`, `incidents`, `ai_investigations`, `ai_investigation_steps`, `governed_actions`, `audit_logs`).
+   - Decimal numeric financial precision (avoiding floating-point arithmetic errors).
+2. **Unified Ingestion & Explicit Provenance:**
+   - Single ingestion path for live Razorpay Test Mode REST calls, HMAC-SHA256 webhooks, and Incident Lab multi-merchant simulations.
+   - Explicit provenance tags: `source: 'razorpay_test'`, `source: 'razorpay_webhook'`, and `source: 'incident_lab'`.
+3. **Unsupervised ML Anomaly Discovery:**
+   - Dynamic feature extraction calculating gateway failure rates, peer baselines, error concentrations, and financial exposures.
+   - Scikit-Learn `IsolationForest` flags genuine anomalies (e.g. `Gateway_X` 19.08% failure rate vs 3.52% baseline, 5.42x deviation) with zero hardcoded scenario knowledge.
+4. **Real AI Investigation with Google Gemini:**
+   - Multi-turn tool-calling loop where Gemini queries PostgreSQL directly using 7 forensic SQL tools (`get_incident`, `get_gateway_metrics`, `get_failed_payments`, `get_affected_merchants`, `get_payment_context`, `get_webhook_activity`, `find_similar_incidents`).
+   - Records every tool turn (arguments, raw database results, latency) into `ai_investigation_steps`.
+5. **Action Governor & Human-in-the-Loop Safety:**
+   - 3-tier risk classification policy (`GREEN`, `YELLOW`, `RED`).
+   - High-stakes operations (`reroute_gateway_traffic`, `pause_settlements`) strictly require human operator authorization.
+   - Safe demonstration simulations guarantee `real_razorpay_payments_modified: 0`.
+6. **Immutable Append-Only Audit Trail:**
+   - Every state transition (`proposed` $\to$ `approved` $\to$ `executed`) appends an immutable row to PostgreSQL `audit_logs`.
+7. **Minimalist 3-View UX:**
+   - **Overview:** 4 Key Metrics + Active Incident Queue.
+   - **Data:** Explicit Real vs Simulation Provenance Breakdown + Tabbed Entity Ledgers.
+   - **Investigation:** Structured telemetry (*What Happened?*, *Why?*, 4 Evidence Cards, Gemini Recommendation, Action Governor, Collapsible AI Tool Trace).
 
 ---
 
 ## 🛠️ Quick Start & Running Locally
 
 ### 1. Prerequisites
-- Python 3.10+
-- Node.js 18+
+- **Python 3.11+**
+- **Node.js 18+**
+- **PostgreSQL 18** running on `127.0.0.1:5432`
 
-### 2. Generate Synthetic Data
-```powershell
-# Activate virtual environment
-.\venv\Scripts\Activate.ps1
-
-# Generate reproducible baseline dataset & golden demo incidents
-python generate_data.py --seed 42 --transactions 2500
+### 2. Environment Configuration
+Copy `.env.example` to `.env`:
+```bash
+cp .env.example .env
+```
+Ensure `.env` contains your PostgreSQL credentials and optional API keys:
+```ini
+DATABASE_URL=postgresql://postgres:password@127.0.0.1:5432/moneyops_v2
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-3.5-flash-lite
 ```
 
-### 3. Run Automated Tests
+### 3. Backend Setup & Test Suite
 ```powershell
+# Activate Python Virtual Environment
+.\venv\Scripts\Activate.ps1
+
+# Run the 39 Automated Backend Tests
 $env:PYTHONPATH="backend"
-.\venv\Scripts\python -m pytest backend/tests/ -v
+python -m pytest backend/tests/ -v
 ```
 
 ### 4. Start Backend Server
 ```powershell
 $env:PYTHONPATH="backend"
-.\venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
-* Interactive API Documentation: **`http://127.0.0.1:8000/docs`**
 
-### 5. Start Frontend Dashboard
+### 5. Start Frontend Control Center
 ```powershell
 cd frontend
-npm run dev
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
-* Operations Control Center: **`http://127.0.0.1:5173/`**
+Open **`http://127.0.0.1:5173`** in your browser.
 
 ---
 
-## 🧪 Golden Demo Scenarios
+## 🧪 Comprehensive Verification & Test Results
 
-### Golden Demo 1: Gateway X Refund Timeout Spike (`INC-2841`)
-- **Root Cause:** Upstream Gateway X bank node timeout causing systematic drops (HTTP 504 / Error R-104).
-- **Blast Radius:** 17 independent merchants, 48+ failing refund pipelines, ₹31.4L potential exposure.
-- **Case Memory Precedent:** Matched `INC-1282` via dense vector cosine similarity.
-- **Governed Action:** `pause_gateway_refund_retries` (RED Tier) → Human approval required → Executed in simulation → Immutable audit entry created.
+### 1. Automated Test Suite (39/39 Passing)
+Command: `pytest backend/tests/ -v`
+```text
+============================= test session starts =============================
+collected 39 items
 
-### Golden Demo 2: Duplicate Instant Refund Race on P19283 (`INC-2840`)
-- **Root Cause:** Dual instant refund execution (`rfnd_R8821` & `rfnd_R8842`) triggered by a 504 webhook acknowledgement timeout.
-- **Blast Radius:** Single payment with ₹9,998 debited on a ₹4,999 order (₹4,999 excess exposure).
-- **Case Memory Precedent:** Matched `INC-840`.
-- **Governed Action:** `freeze_duplicate_refund_workflow` (RED Tier) → Operator approved → Duplicate ledger debit blocked.
+backend/tests/test_action_governor.py (7 tests) ................. PASSED [ 17%]
+backend/tests/test_anomaly_detector.py (5 tests) ................ PASSED [ 30%]
+backend/tests/test_gemini_agent.py (12 tests) ................... PASSED [ 61%]
+backend/tests/test_pipeline.py (4 tests) ........................ PASSED [ 71%]
+backend/tests/test_razorpay_sync.py (4 tests) ................... PASSED [ 82%]
+backend/tests/test_webhooks.py (7 tests) ........................ PASSED [100%]
+
+============================= 39 passed in 13.77s =============================
+```
+
+### 2. Frontend Production Build
+Command: `npm run build` in `frontend/`
+```text
+✓ 21 modules transformed.
+dist/index.html                   0.50 kB │ gzip:  0.33 kB
+dist/assets/index-dCc8LGxO.css    4.07 kB │ gzip:  1.55 kB
+dist/assets/index-Lh7Afyqu.js   241.64 kB │ gzip: 69.47 kB
+✓ built in 149ms
+```
 
 ---
 
-## 📂 Documentation Directory
+## 📁 Repository Structure
 
-Detailed technical documents are available in the [`docs/`](file:///c:/Users/asus/Desktop/RzorPayInternProj/docs/) directory:
-- [`docs/IMPLEMENTATION_STATUS.md`](file:///c:/Users/asus/Desktop/RzorPayInternProj/docs/IMPLEMENTATION_STATUS.md) — Subsystem audit & verification map.
-- [`docs/ARCHITECTURE.md`](file:///c:/Users/asus/Desktop/RzorPayInternProj/docs/ARCHITECTURE.md) — Architectural design and subsystem interactions.
-- [`docs/DATA_MODEL.md`](file:///c:/Users/asus/Desktop/RzorPayInternProj/docs/DATA_MODEL.md) — Relational schema and table dictionary.
-- [`docs/DATA_PIPELINE.md`](file:///c:/Users/asus/Desktop/RzorPayInternProj/docs/DATA_PIPELINE.md) — Canonical ingestion pipeline and normalization.
-- [`docs/AI_AGENT.md`](file:///c:/Users/asus/Desktop/RzorPayInternProj/docs/AI_AGENT.md) — Multi-turn ReAct agent and tool specifications.
-- [`docs/ML_ANOMALY_DETECTION.md`](file:///c:/Users/asus/Desktop/RzorPayInternProj/docs/ML_ANOMALY_DETECTION.md) — Isolation Forest ML feature engine.
-- [`docs/CASE_MEMORY.md`](file:///c:/Users/asus/Desktop/RzorPayInternProj/docs/CASE_MEMORY.md) — Dense neural embeddings and cosine similarity.
-- [`docs/RAZORPAY_INTEGRATION.md`](file:///c:/Users/asus/Desktop/RzorPayInternProj/docs/RAZORPAY_INTEGRATION.md) — Webhook receiver and signature validation.
-- [`docs/GOVERNANCE.md`](file:///c:/Users/asus/Desktop/RzorPayInternProj/docs/GOVERNANCE.md) — 3-tier action permissions and audit logs.
-- [`docs/EVALUATION.md`](file:///c:/Users/asus/Desktop/RzorPayInternProj/docs/EVALUATION.md) — Production evolution & interview defense guide.
+```text
+MoneyOpsAI/
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   │   └── routes.py              # FastAPI REST Endpoints
+│   │   ├── core/
+│   │   │   └── config.py              # Pydantic Settings & Env Vars
+│   │   ├── engine/
+│   │   │   ├── action_governor.py     # 3-Tier Risk Policy & Safe Executor
+│   │   │   ├── anomaly_detector.py    # Scikit-Learn IsolationForest Anomaly Engine
+│   │   │   ├── database.py            # PostgreSQL Schema & Connection Pool
+│   │   │   ├── gemini_agent.py        # Autonomous Multi-Turn Tool-Calling Agent
+│   │   │   ├── incident_lab.py        # Reproducible Multi-Merchant Generator
+│   │   │   ├── investigation_tools.py # 7 SQL Forensic Investigation Tools
+│   │   │   ├── pipeline.py            # Canonical Ingestion Pipeline
+│   │   │   └── webhook_service.py     # HMAC-SHA256 Webhook Processor
+│   │   └── integrations/
+│   │       └── razorpay/              # Official Razorpay REST & Webhook Adapters
+│   └── tests/                         # 39 Comprehensive Pytest Tests
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── Header.jsx             # 3-Tab Navigation & Live Status Badges
+│   │   │   ├── OverviewView.jsx       # 4 Core Metrics & Active Incident Queue
+│   │   │   ├── DataView.jsx           # Real vs Simulation Provenance & Ledgers
+│   │   │   └── InvestigationView.jsx  # Structured Forensic Telemetry & Action Governor
+│   │   ├── api.js                     # Centralized Fetch API Client
+│   │   ├── App.jsx                    # Root Application Container & Tab Router
+│   │   └── index.css                  # Dark Mode Design Tokens
+│   └── package.json                   # React 18 + Vite Bundler
+├── docs/
+│   ├── ARCHITECTURE_DIAGRAM.md        # Complete ASCII / Mermaid Architecture Flow
+│   ├── DEMO_WALKTHROUGH.md            # 10-Step Interactive Demonstration Script
+│   ├── PROJECT_PRESENTATION_EXPLANATION.md # Technical Deep Dive & Interview Guide
+│   └── PHASE_E_UI_AUDIT.md            # UI & Architecture Audit
+├── .env.example                       # Clean Template for Configuration
+└── README.md                          # Master Project Presentation
+```
+
+---
+
+## 📄 License & Attribution
+
+Developed as an advanced engineering submission for the **Razorpay Internship Selection**.  
+Author: **Diwakar Kaushik (BTech AI & Data Engineering)**.
