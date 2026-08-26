@@ -12,6 +12,7 @@ from app.engine.anomaly_detector import anomaly_detector
 from app.integrations.razorpay.client import razorpay_client
 from app.integrations.razorpay.mapper import RazorpayMapper
 from app.integrations.razorpay.exceptions import RazorpayAuthError
+from app.engine.gemini_agent import gemini_agent
 
 router = APIRouter()
 
@@ -328,3 +329,111 @@ def get_incident(incident_id: str):
         except Exception:
             d["evidence"] = None
     return d
+
+# =============================================================================
+# REAL AI INVESTIGATION (PHASE C — GEMINI TOOL CALLING)
+# =============================================================================
+
+@router.get("/ai/status")
+def get_ai_status():
+    """Returns the Gemini AI provider configuration status."""
+    return gemini_agent.get_status()
+
+@router.post("/incidents/{incident_id}/investigate")
+def run_ai_investigation(incident_id: str):
+    """
+    Executes a real multi-turn Gemini investigation against PostgreSQL.
+    Allows Gemini to call tools, query data, and store an auditable forensic report.
+    """
+    result = gemini_agent.investigate_incident(incident_id)
+    if result.get("status") == "error":
+        err_code = result.get("error_code")
+        if err_code == "AI_NOT_CONFIGURED":
+            raise HTTPException(status_code=400, detail={
+                "error_code": "AI_NOT_CONFIGURED",
+                "message": "Gemini API key is not configured. Please set GEMINI_API_KEY in .env."
+            })
+        elif err_code == "INCIDENT_NOT_FOUND":
+            raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found.")
+        elif err_code == "AI_AUTHENTICATION_FAILED":
+            raise HTTPException(status_code=401, detail={
+                "error_code": "AI_AUTHENTICATION_FAILED",
+                "message": "Gemini API key authentication failed."
+            })
+        else:
+            raise HTTPException(status_code=500, detail=result)
+    return result
+
+@router.get("/investigations/{investigation_id}")
+def get_investigation(investigation_id: str):
+    """Retrieves an investigation record from PostgreSQL."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM ai_investigations WHERE investigation_id = %s;", (investigation_id,))
+    row = c.fetchone()
+    c.close()
+    conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Investigation '{investigation_id}' not found")
+
+    d = dict(row)
+    if d.get("evidence_json"):
+        try:
+            d["evidence"] = json.loads(d["evidence_json"])
+        except Exception:
+            pass
+    if d.get("affected_entities_json"):
+        try:
+            d["affected_entities"] = json.loads(d["affected_entities_json"])
+        except Exception:
+            pass
+    return d
+
+@router.get("/investigations/{investigation_id}/steps")
+def get_investigation_steps(investigation_id: str):
+    """Retrieves all forensic tool calling steps for an investigation from PostgreSQL."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM ai_investigation_steps WHERE investigation_id = %s ORDER BY step_number ASC;", (investigation_id,))
+    rows = c.fetchall()
+    c.close()
+    conn.close()
+
+    steps = []
+    for r in rows:
+        d = dict(r)
+        if d.get("input_json"):
+            try:
+                d["arguments"] = json.loads(d["input_json"])
+            except Exception:
+                d["arguments"] = d["input_json"]
+        if d.get("output_json"):
+            try:
+                d["result"] = json.loads(d["output_json"])
+            except Exception:
+                d["result"] = d["output_json"]
+        steps.append(d)
+    return steps
+
+@router.get("/incidents/{incident_id}/investigations")
+def list_incident_investigations(incident_id: str):
+    """Lists all historical AI investigations associated with an incident."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM ai_investigations WHERE incident_id = %s ORDER BY started_at DESC;", (incident_id,))
+    rows = c.fetchall()
+    c.close()
+    conn.close()
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        if d.get("evidence_json"):
+            try:
+                d["evidence"] = json.loads(d["evidence_json"])
+            except Exception:
+                pass
+        results.append(d)
+    return results
+

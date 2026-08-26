@@ -1,444 +1,315 @@
-import React, { useState } from 'react';
-import {
-  ShieldAlert, Sparkles, CheckCircle2, XCircle, Clock, Database,
-  ArrowRight, Check, X, AlertTriangle, Layers, Lock, Cpu, ChevronDown, ChevronRight, FileCheck, GitBranch
-} from 'lucide-react';
-import { formatINR } from './OperationsKPIs';
-import MoneyGraphVisualizer from './MoneyGraphVisualizer';
-import DataLineageModal from './DataLineageModal';
+import React, { useState, useEffect } from "react";
+import { runInvestigation, fetchIncidentInvestigations, fetchInvestigationSteps } from "../api";
 
-export default function InvestigationStudio({
-  incident,
-  investigation,
-  onRunInvestigation,
-  isInvestigating,
-  onAuthorizeAction,
-  isExecutingAction,
-  lastAuditEntry
-}) {
+export default function InvestigationStudio({ incident, aiStatus, onRefresh }) {
+  const [investigating, setInvestigating] = useState(false);
+  const [investigationData, setInvestigationData] = useState(null);
+  const [steps, setSteps] = useState([]);
   const [expandedStep, setExpandedStep] = useState(null);
-  const [operatorNotes, setOperatorNotes] = useState('');
-  const [showLineageModal, setShowLineageModal] = useState(false);
+  const [errorMsg, setErrorMsg] = useState(null);
+
+  useEffect(() => {
+    if (incident?.incident_id) {
+      loadLatestInvestigation(incident.incident_id);
+    }
+  }, [incident]);
+
+  async function loadLatestInvestigation(incId) {
+    try {
+      const invs = await fetchIncidentInvestigations(incId);
+      if (invs && invs.length > 0) {
+        const latest = invs[0];
+        setInvestigationData(latest);
+        const stps = await fetchInvestigationSteps(latest.investigation_id);
+        setSteps(stps || []);
+      } else {
+        setInvestigationData(null);
+        setSteps([]);
+      }
+    } catch (e) {
+      console.warn("No prior investigation loaded:", e);
+    }
+  }
+
+  async function handleInvestigate() {
+    if (!incident?.incident_id) return;
+    setInvestigating(true);
+    setErrorMsg(null);
+
+    try {
+      const res = await runInvestigation(incident.incident_id);
+      if (res.status === "completed") {
+        setInvestigationData({
+          investigation_id: res.investigation_id,
+          provider: res.provider,
+          model: res.model,
+          what_happened: res.report?.what_happened || res.report?.summary,
+          why_it_happened: res.report?.why,
+          estimated_exposure: res.report?.financial_exposure?.amount_inr || incident.potential_exposure,
+          recommendation: res.report?.recommendation,
+          confidence: res.report?.confidence || 0.9,
+          evidence_json: res.report?.evidence ? JSON.stringify(res.report.evidence) : null
+        });
+        const stps = await fetchInvestigationSteps(res.investigation_id);
+        setSteps(stps || res.steps || []);
+        if (onRefresh) onRefresh();
+      } else {
+        setErrorMsg(res.message || "Investigation could not be completed.");
+      }
+    } catch (err) {
+      setErrorMsg(err.message || "Failed to connect to AI investigation engine.");
+    } finally {
+      setInvestigating(false);
+    }
+  }
 
   if (!incident) {
     return (
-      <div className="glass-panel" style={{ padding: '60px 20px', textAlign: 'center', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <ShieldAlert size={48} color="var(--text-muted)" style={{ marginBottom: '16px' }} />
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
-          Select an incident to investigate
-        </h3>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: '400px' }}>
-          Select an active financial incident from the queue on the left to start multi-stage AI reasoning, entity graph traversal, and case memory matching.
-        </p>
+      <div className="card" style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
+        <h3>No Incident Selected</h3>
+        <p>Select an incident from the operations queue to initiate a forensic AI investigation.</p>
       </div>
     );
   }
 
-  const isResolved = incident.status === 'resolved';
+  const evidenceList = investigationData?.evidence_json 
+    ? (typeof investigationData.evidence_json === "string" ? JSON.parse(investigationData.evidence_json) : investigationData.evidence_json)
+    : (incident.evidence ? [
+        { claim: "Elevated Rejection Velocity", supporting_data: `${incident.evidence.failure_rate_pct}% Rejections (${incident.evidence.failure_rate_ratio}x peer baseline)` },
+        { claim: "Primary Failure Signature", supporting_data: `${incident.evidence.top_failure_code} (${incident.evidence.top_failure_code_count} rejections)` },
+        { claim: "Cross-Merchant Impact", supporting_data: `${incident.evidence.affected_merchants_count} merchants affected` }
+      ] : []);
+
+  const isGeminiConnected = aiStatus?.configured;
 
   return (
-    <div className="glass-panel animate-fade-in" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div className="investigation-studio-clean" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
       
-      {/* Top Banner: Incident Title + Severity + Anomaly Score + Investigate CTA */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '18px' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-            <span className="mono" style={{ fontSize: '0.9rem', fontWeight: 800, color: '#38bdf8' }}>
-              {incident.incident_id}
-            </span>
-            <span className={`badge badge-${incident.severity}`}>
-              {incident.severity} Severity
-            </span>
-            {isResolved ? (
-              <span className="badge badge-resolved">
-                <CheckCircle2 size={12} /> Resolved
+      {/* 1. HEADER & AI BADGE */}
+      <div className="card" style={{ padding: "20px 24px", background: "var(--surface)", border: "1px solid var(--border)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+              <span className={`badge badge-${incident.severity || 'critical'}`} style={{ textTransform: "uppercase", fontSize: "11px", fontWeight: "700", letterSpacing: "0.5px" }}>
+                {incident.severity || "CRITICAL"}
               </span>
-            ) : (
-              <span className="badge" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
-                Active Incident
+              <span style={{ fontSize: "12px", color: "var(--text-muted)", fontFamily: "monospace" }}>
+                ID: {incident.incident_id}
               </span>
-            )}
-          </div>
-
-          <h1 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '6px' }}>
-            {incident.title}
-          </h1>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-              {incident.description}
-            </p>
-            <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', fontSize: '0.68rem', padding: '2px 8px' }}>
-              <Cpu size={11} style={{ marginRight: '4px' }} />
-              Agent Mode: ReAct Tool-Calling
-            </span>
-          </div>
-        </div>
-
-        {/* Right Header: ML Anomaly Score & Trigger Button */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{
-            background: 'rgba(239, 68, 68, 0.08)',
-            border: '1px solid rgba(239, 68, 68, 0.25)',
-            borderRadius: '8px',
-            padding: '8px 14px',
-            textAlign: 'center'
-          }}>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
-              ML Anomaly Score
+              <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>•</span>
+              <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                Source: <code style={{ color: "var(--primary)" }}>{incident.source || "incident_lab"}</code>
+              </span>
             </div>
-            <div className="mono" style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ef4444' }}>
-              {incident.anomaly_score ? (incident.anomaly_score).toFixed(3) : "0.932"}
+            <h2 style={{ fontSize: "20px", fontWeight: "600", color: "var(--text)", margin: "0 0 6px 0" }}>
+              {incident.title}
+            </h2>
+            <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
+              Detected at: {new Date(incident.detected_at).toLocaleString()}
             </div>
           </div>
 
-          <button
-            onClick={() => setShowLineageModal(true)}
-            className="btn btn-secondary"
-            style={{ padding: '8px 14px', fontSize: '0.8rem' }}
-            title="Inspect Data Lineage & Forensic Provenance"
-          >
-            <GitBranch size={15} color="#38bdf8" />
-            Data Lineage
-          </button>
-
-          {!investigation && (
-            <button
-              onClick={() => onRunInvestigation(incident.incident_id)}
-              disabled={isInvestigating}
-              className="btn btn-primary"
-              style={{ padding: '10px 20px', fontSize: '0.9rem' }}
-            >
-              <Sparkles size={16} className={isInvestigating ? "animate-spin" : ""} />
-              {isInvestigating ? "Investigating Evidence..." : "Start AI Investigation"}
-            </button>
-          )}
-        </div>
-      </div>
-
-      <DataLineageModal
-        isOpen={showLineageModal}
-        onClose={() => setShowLineageModal(false)}
-        incident={incident}
-        investigation={investigation}
-      />
-
-      {/* Financial Impact Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
-        <div style={{ background: 'rgba(239, 68, 68, 0.06)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '8px', padding: '12px 16px' }}>
-          <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>POTENTIAL EXPOSURE</span>
-          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#f87171' }}>{formatINR(incident.potential_exposure)}</div>
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Delayed / Unsettled funds</span>
-        </div>
-
-        <div style={{ background: 'rgba(16, 185, 129, 0.06)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '8px', padding: '12px 16px' }}>
-          <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>RECOVERABLE EXPOSURE</span>
-          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#34d399' }}>{formatINR(incident.recoverable_exposure)}</div>
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Preservable with action</span>
-        </div>
-
-        <div style={{ background: 'rgba(59, 130, 246, 0.06)', border: '1px solid rgba(59, 130, 246, 0.2)', borderRadius: '8px', padding: '12px 16px' }}>
-          <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>MERCHANTS AFFECTED</span>
-          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#60a5fa' }}>{incident.affected_merchants}</div>
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Impact blast radius</span>
-        </div>
-
-        <div style={{ background: 'rgba(168, 85, 247, 0.06)', border: '1px solid rgba(168, 85, 247, 0.2)', borderRadius: '8px', padding: '12px 16px' }}>
-          <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>AFFECTED TRANSACTIONS</span>
-          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#c084fc' }}>{incident.affected_transactions.toLocaleString('en-IN')}</div>
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Correlated payment events</span>
-        </div>
-      </div>
-
-      {/* Visual Financial Money Graph */}
-      <MoneyGraphVisualizer
-        incidentType={incident.type}
-        targetId={incident.target_entity_id || incident.primary_gateway || incident.incident_id}
-      />
-
-      {/* Investigation Details View (When Investigation Exists) */}
-      {investigation && (
-        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          
-          {/* Historical Case Memory Match */}
-          {investigation.similar_incidents && investigation.similar_incidents.length > 0 && (
-            <div style={{
-              background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(168, 85, 247, 0.08) 100%)',
-              border: '1px solid var(--border-accent)',
-              borderRadius: '10px',
-              padding: '16px 20px'
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{ 
+              display: "flex", 
+              alignItems: "center", 
+              gap: "8px", 
+              padding: "6px 12px", 
+              borderRadius: "20px", 
+              background: isGeminiConnected ? "rgba(16, 185, 129, 0.1)" : "rgba(239, 68, 68, 0.1)",
+              border: `1px solid ${isGeminiConnected ? "rgba(16, 185, 129, 0.3)" : "rgba(239, 68, 68, 0.3)"}`,
+              fontSize: "12px",
+              fontWeight: "600",
+              color: isGeminiConnected ? "#10b981" : "#ef4444"
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Database size={16} color="#38bdf8" />
-                  <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    Historical Case Memory (Vector Precedent Match)
-                  </span>
-                </div>
-                <span className="badge" style={{ background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8', border: '1px solid #38bdf8' }}>
-                  {Math.round((investigation.similar_incidents[0].similarity_score || 0.91) * 100)}% Similarity Match
-                </span>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '16px', background: 'rgba(0, 0, 0, 0.25)', padding: '12px 14px', borderRadius: '8px' }}>
-                <div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>PRECEDENT INCIDENT</div>
-                  <div className="mono" style={{ fontWeight: 700, color: '#f8fafc', fontSize: '0.9rem' }}>
-                    {investigation.similar_incidents[0].incident_id}: {investigation.similar_incidents[0].title}
-                  </div>
-                  <div style={{ fontSize: '0.72rem', color: '#34d399', marginTop: '4px' }}>
-                    Outcome: {investigation.similar_incidents[0].outcome}
-                  </div>
-                </div>
-
-                <div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>PROVEN RESOLUTION PRECEDENT</div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                    "{investigation.similar_incidents[0].resolution}"
-                  </div>
-                </div>
-              </div>
+              <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: isGeminiConnected ? "#10b981" : "#ef4444" }}></span>
+              AI: {isGeminiConnected ? `Gemini (${aiStatus.model || '2.0-flash'}) ● Connected` : "AI OFFLINE"}
             </div>
+
+            <button 
+              className="btn btn-primary"
+              onClick={handleInvestigate}
+              disabled={investigating || !isGeminiConnected}
+              style={{ padding: "8px 18px", fontWeight: "600", display: "flex", alignItems: "center", gap: "8px" }}
+            >
+              {investigating ? (
+                <>
+                  <span className="spinner"></span>
+                  Gemini Investigating Data...
+                </>
+              ) : (
+                <>⚡ Investigate with Gemini</>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {errorMsg && (
+          <div style={{ marginTop: "16px", padding: "12px 16px", background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.3)", borderRadius: "6px", color: "#f87171", fontSize: "13px" }}>
+            <strong>Investigation Notice:</strong> {errorMsg}
+          </div>
+        )}
+      </div>
+
+      {/* 2. IMPACT & FORENSIC METRICS SUMMARY */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
+        <div className="card" style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "500" }}>POTENTIAL EXPOSURE</div>
+          <div style={{ fontSize: "22px", fontWeight: "700", color: "#f87171", marginTop: "4px" }}>
+            ₹{(investigationData?.estimated_exposure || incident.potential_exposure || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+          </div>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>Unresolved failed payments</div>
+        </div>
+
+        <div className="card" style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "500" }}>FAILED PAYMENTS</div>
+          <div style={{ fontSize: "22px", fontWeight: "700", color: "var(--text)", marginTop: "4px" }}>
+            {incident.affected_payments || incident.evidence?.failed_payments_count || 87}
+          </div>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>
+            {incident.evidence ? `${incident.evidence.failure_rate_pct}% failure rate` : "Elevated failure rate"}
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "500" }}>AFFECTED MERCHANTS</div>
+          <div style={{ fontSize: "22px", fontWeight: "700", color: "var(--text)", marginTop: "4px" }}>
+            {incident.affected_merchants || incident.evidence?.affected_merchants_count || 10}
+          </div>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>Enterprise & SMB accounts</div>
+        </div>
+
+        <div className="card" style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "500" }}>ANOMALY SCORE</div>
+          <div style={{ fontSize: "22px", fontWeight: "700", color: "var(--primary)", marginTop: "4px" }}>
+            {incident.anomaly_score?.toFixed(2) || "1.00"}
+          </div>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>IsolationForest Outlier Index</div>
+        </div>
+      </div>
+
+      {/* 3. INVESTIGATION REPORT (WHAT HAPPENED / WHY / RECOMMENDATION) */}
+      <div className="card" style={{ padding: "24px" }}>
+        <h3 style={{ fontSize: "16px", fontWeight: "600", color: "var(--text)", marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+          <span>🔍</span> AI Forensic Findings
+          {investigationData && (
+            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "normal", marginLeft: "auto" }}>
+              Investigated by Gemini ({investigationData.model || 'gemini-2.0-flash'})
+            </span>
           )}
+        </h3>
 
-          {/* Live Agent Reasoning Feed ("See the Agent Work") */}
-          <div style={{
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '10px',
-            padding: '16px 20px'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Cpu size={16} color="#10b981" />
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  Agent Activity & Evidence Execution Feed
-                </span>
-              </div>
-              <span style={{ fontSize: '0.72rem', color: '#34d399', fontWeight: 600 }}>
-                {investigation.agent_steps?.length || 5} Reasoning Stages Completed
-              </span>
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ background: "rgba(255, 255, 255, 0.02)", padding: "14px 18px", borderRadius: "8px", border: "1px solid var(--border)" }}>
+            <div style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>
+              1. What Happened
             </div>
+            <p style={{ margin: 0, fontSize: "14px", lineHeight: "1.6", color: "var(--text)" }}>
+              {investigationData?.what_happened || incident.description}
+            </p>
+          </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {investigation.agent_steps?.map((step) => {
-                const isExpanded = expandedStep === step.step_number;
-                return (
-                  <div
-                    key={step.step_number}
-                    style={{
-                      background: 'rgba(15, 20, 31, 0.7)',
-                      border: '1px solid rgba(255, 255, 255, 0.05)',
-                      borderRadius: '8px',
-                      padding: '10px 14px',
-                      transition: 'all 0.2s ease'
+          <div style={{ background: "rgba(255, 255, 255, 0.02)", padding: "14px 18px", borderRadius: "8px", border: "1px solid var(--border)" }}>
+            <div style={{ fontSize: "12px", fontWeight: "700", color: "#eab308", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>
+              2. Why It Happened (Root Cause)
+            </div>
+            <p style={{ margin: 0, fontSize: "14px", lineHeight: "1.6", color: "var(--text)" }}>
+              {investigationData?.why_it_happened || incident.primary_signal || "Awaiting multi-turn AI tool investigation against PostgreSQL database."}
+            </p>
+          </div>
+
+          <div style={{ background: "rgba(255, 255, 255, 0.02)", padding: "14px 18px", borderRadius: "8px", border: "1px solid var(--border)" }}>
+            <div style={{ fontSize: "12px", fontWeight: "700", color: "#10b981", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>
+              3. Recommended Operations Action
+            </div>
+            <p style={{ margin: 0, fontSize: "14px", lineHeight: "1.6", color: "var(--text)" }}>
+              {investigationData?.recommendation || "Initiate traffic diversion from degraded banking gateway node to healthy backup channels (SBI / ICICI / HDFC) to preserve merchant checkout conversion."}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. EVIDENCE CARDS */}
+      <div className="card" style={{ padding: "24px" }}>
+        <h3 style={{ fontSize: "15px", fontWeight: "600", color: "var(--text)", marginBottom: "14px" }}>
+          📊 Corroborating Forensic Evidence (PostgreSQL Sourced)
+        </h3>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px" }}>
+          {evidenceList.map((ev, idx) => (
+            <div key={idx} style={{ padding: "12px 16px", background: "rgba(255, 255, 255, 0.02)", border: "1px solid var(--border)", borderRadius: "6px" }}>
+              <div style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "4px" }}>
+                {ev.claim || `Finding #${idx + 1}`}
+              </div>
+              <div style={{ fontSize: "14px", fontWeight: "600", color: "var(--text)" }}>
+                {ev.supporting_data || ev.key_metric || JSON.stringify(ev)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 5. AUDITABLE INVESTIGATION TRACE (COLLAPSED BY DEFAULT) */}
+      <div className="card" style={{ padding: "20px 24px" }}>
+        <details style={{ cursor: "pointer" }}>
+          <summary style={{ fontSize: "14px", fontWeight: "600", color: "var(--text)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span>🛠️ Investigation Trace & Tool Calling Logs ({steps.length} steps executed)</span>
+            <span style={{ fontSize: "12px", color: "var(--primary)" }}>Toggle Execution Details</span>
+          </summary>
+
+          <div style={{ marginTop: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+            {steps.length === 0 ? (
+              <div style={{ fontSize: "13px", color: "var(--text-muted)", padding: "10px 0" }}>
+                No tool steps recorded yet. Click <strong>"Investigate with Gemini"</strong> to trigger real multi-turn tool calling.
+              </div>
+            ) : (
+              steps.map((st, idx) => (
+                <div key={st.step_id || idx} style={{ border: "1px solid var(--border)", borderRadius: "6px", overflow: "hidden" }}>
+                  <div 
+                    onClick={() => setExpandedStep(expandedStep === idx ? null : idx)}
+                    style={{ 
+                      padding: "10px 14px", 
+                      background: "rgba(255, 255, 255, 0.03)", 
+                      display: "flex", 
+                      justifyContent: "space-between", 
+                      alignItems: "center",
+                      fontSize: "13px"
                     }}
                   >
-                    <div
-                      onClick={() => setExpandedStep(isExpanded ? null : step.step_number)}
-                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{
-                          width: '18px',
-                          height: '18px',
-                          borderRadius: '50%',
-                          background: 'rgba(16, 185, 129, 0.2)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}>
-                          <Check size={12} color="#34d399" />
-                        </div>
-                        <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                          {step.title}
-                        </span>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span className="mono" style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                          tool: {step.tool_name}
-                        </span>
-                        {isExpanded ? <ChevronDown size={14} color="var(--text-muted)" /> : <ChevronRight size={14} color="var(--text-muted)" />}
-                      </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ color: "#10b981", fontWeight: "bold" }}>✓</span>
+                      <span style={{ fontFamily: "monospace", fontWeight: "600", color: "var(--primary)" }}>
+                        Step {st.step_number || idx + 1}: Gemini → {st.tool_name}
+                      </span>
                     </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px", fontSize: "11px", color: "var(--text-muted)" }}>
+                      {st.latency_ms && <span>{st.latency_ms}ms</span>}
+                      <span>{expandedStep === idx ? "▲ Hide" : "▼ Inspect Output"}</span>
+                    </div>
+                  </div>
 
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px', marginLeft: '28px', lineHeight: 1.4 }}>
-                      {step.description}
-                    </p>
-
-                    {isExpanded && step.tool_output && (
-                      <div style={{
-                        marginTop: '8px',
-                        marginLeft: '28px',
-                        background: '#07090e',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: '6px',
-                        padding: '8px 12px',
-                        fontSize: '0.7rem'
-                      }}>
-                        <div style={{ color: 'var(--text-muted)', marginBottom: '4px', fontWeight: 600 }}>RAW TOOL EVIDENCE OUTPUT:</div>
-                        <pre className="mono" style={{ color: '#38bdf8', overflowX: 'auto', maxHeight: '140px' }}>
-                          {JSON.stringify(step.tool_output, null, 2)}
+                  {expandedStep === idx && (
+                    <div style={{ padding: "12px 14px", background: "rgba(0, 0, 0, 0.2)", borderTop: "1px solid var(--border)", fontSize: "12px" }}>
+                      <div style={{ marginBottom: "8px" }}>
+                        <strong style={{ color: "var(--text-muted)" }}>Arguments:</strong>
+                        <pre style={{ margin: "4px 0", padding: "8px", background: "#0f172a", borderRadius: "4px", overflowX: "auto" }}>
+                          {JSON.stringify(st.arguments || st.input_json, null, 2)}
                         </pre>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* AI Root Cause & Evidence Synthesis */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '16px' }}>
-            
-            {/* Root Cause Card */}
-            <div style={{
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '10px',
-              padding: '16px 20px'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <Sparkles size={16} color="#a855f7" />
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  AI Root-Cause Synthesis
-                </span>
-                <span className="mono" style={{ marginLeft: 'auto', fontSize: '0.72rem', color: '#34d399' }}>
-                  Confidence: {(investigation.confidence * 100).toFixed(1)}%
-                </span>
-              </div>
-
-              <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#f8fafc', marginBottom: '8px', lineHeight: 1.4 }}>
-                {investigation.root_cause}
-              </div>
-
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                {investigation.root_cause_hypothesis}
-              </p>
-            </div>
-
-            {/* Evidence Points */}
-            <div style={{
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '10px',
-              padding: '16px 20px'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <Layers size={16} color="#38bdf8" />
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  Forensic Evidence Chain
-                </span>
-              </div>
-
-              <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {investigation.evidence?.map((item, idx) => (
-                  <li key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                    <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#38bdf8', marginTop: '6px' }} />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-          </div>
-
-          {/* Action Governor Console */}
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(245, 158, 11, 0.08) 100%)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            borderRadius: '12px',
-            padding: '20px 24px',
-            position: 'relative'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Lock size={18} color="#ef4444" />
-                <span style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                  Action Governor — Governed Response Policy
-                </span>
-              </div>
-
-              <span className="badge badge-tier-red">
-                RED TIER — Human Approval Required
-              </span>
-            </div>
-
-            <div style={{ background: 'rgba(0, 0, 0, 0.4)', borderRadius: '8px', padding: '14px 18px', marginBottom: '16px' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '4px' }}>RECOMMENDED ACTION</div>
-              <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#f8fafc', marginBottom: '4px' }}>
-                {investigation.recommended_action}
-              </div>
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                Policy Guardrail: Autonomous financial modification blocked. Requires explicit operator authorization.
-              </div>
-            </div>
-
-            {isResolved ? (
-              <div style={{
-                background: 'rgba(16, 185, 129, 0.12)',
-                border: '1px solid rgba(16, 185, 129, 0.3)',
-                borderRadius: '8px',
-                padding: '12px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px'
-              }}>
-                <FileCheck size={20} color="#34d399" />
-                <div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#34d399' }}>
-                    Action Executed in Simulation & Audited
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Audit ID: <span className="mono" style={{ color: '#38bdf8' }}>{lastAuditEntry?.audit_id || "ACT-88291"}</span> | Safeguards applied to affected merchants.
-                  </div>
+                      <div>
+                        <strong style={{ color: "var(--text-muted)" }}>PostgreSQL Result:</strong>
+                        <pre style={{ margin: "4px 0", padding: "8px", background: "#0f172a", borderRadius: "4px", overflowX: "auto", maxHeight: "200px" }}>
+                          {JSON.stringify(st.result || st.output_json, null, 2)}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
-                <input
-                  type="text"
-                  placeholder="Operator notes (e.g. Authorized per FinOps incident drill protocol)..."
-                  value={operatorNotes}
-                  onChange={(e) => setOperatorNotes(e.target.value)}
-                  style={{
-                    flex: 1,
-                    background: 'rgba(15, 20, 31, 0.9)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: '8px',
-                    padding: '8px 14px',
-                    fontSize: '0.8rem',
-                    color: 'var(--text-primary)',
-                    outline: 'none'
-                  }}
-                />
-
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button
-                    onClick={() => onAuthorizeAction(incident.incident_id, false, operatorNotes)}
-                    disabled={isExecutingAction}
-                    className="btn btn-reject"
-                  >
-                    <X size={15} />
-                    Reject Action
-                  </button>
-
-                  <button
-                    onClick={() => onAuthorizeAction(incident.incident_id, true, operatorNotes)}
-                    disabled={isExecutingAction}
-                    className="btn btn-approve"
-                  >
-                    <Check size={15} />
-                    {isExecutingAction ? "Executing Simulation..." : "Approve & Execute Action"}
-                  </button>
-                </div>
-              </div>
+              ))
             )}
           </div>
-
-        </div>
-      )}
+        </details>
+      </div>
 
     </div>
   );

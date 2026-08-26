@@ -1,138 +1,116 @@
 import React from 'react';
-import { ShieldCheck, Activity, Database, FileText, Cpu, RotateCcw, AlertTriangle } from 'lucide-react';
 
-export default function Header({ activeTab, setActiveTab, onReset, isResetting, onOpenWebhookModal }) {
+export default function Header({ stats, aiStatus, onRefresh }) {
+  const isGemini = aiStatus?.configured;
+
   return (
     <header style={{
-      borderBottom: '1px solid var(--border-subtle)',
-      background: 'rgba(15, 20, 31, 0.85)',
-      backdropFilter: 'blur(16px)',
+      borderBottom: '1px solid var(--border)',
+      background: 'rgba(15, 23, 42, 0.95)',
+      backdropFilter: 'blur(12px)',
       position: 'sticky',
       top: 0,
-      zIndex: 100
+      zIndex: 100,
+      padding: '0 24px'
     }}>
-      <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '70px' }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        height: '64px',
+        maxWidth: '1600px',
+        margin: '0 auto'
+      }}>
         
         {/* Left: Branding & Tagline */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{
-            width: '42px',
-            height: '42px',
-            borderRadius: '10px',
-            background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+            width: '36px',
+            height: '36px',
+            borderRadius: '8px',
+            background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 0 16px rgba(59, 130, 246, 0.4)'
+            boxShadow: '0 0 12px rgba(99, 102, 241, 0.4)',
+            color: '#fff',
+            fontWeight: '800',
+            fontSize: '18px'
           }}>
-            <ShieldCheck size={24} color="#ffffff" />
+            M
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '1.25rem', fontWeight: 800, letterSpacing: '-0.02em', background: 'linear-gradient(to right, #ffffff, #93c5fd)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              <span style={{ fontSize: '1.15rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#fff' }}>
                 MONEYOPS AI
               </span>
-              <span className="badge badge-critical" style={{ fontSize: '0.65rem', padding: '2px 6px' }}>
-                FinOps Intelligence
+              <span style={{ 
+                fontSize: '10px', 
+                padding: '2px 8px', 
+                borderRadius: '12px', 
+                background: 'rgba(99, 102, 241, 0.15)', 
+                color: 'var(--primary)',
+                fontWeight: '700'
+              }}>
+                V2 • Phase C
               </span>
             </div>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500 }}>
-              When money doesn't add up, MoneyOps finds out why.
+            <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, fontWeight: 500 }}>
+              Autonomous Financial Incident Investigator for Razorpay Payment Operations
             </p>
           </div>
         </div>
 
-        {/* Center: Navigation Tabs */}
-        <nav style={{ display: 'flex', gap: '6px', background: 'rgba(0, 0, 0, 0.3)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-subtle)' }}>
-          <button
-            onClick={() => setActiveTab('operations')}
-            className="btn btn-ghost"
-            style={{
-              padding: '6px 14px',
-              fontSize: '0.8rem',
-              background: activeTab === 'operations' ? 'var(--bg-card-hover)' : 'transparent',
-              color: activeTab === 'operations' ? '#38bdf8' : 'var(--text-secondary)',
-              borderColor: activeTab === 'operations' ? 'var(--border-accent)' : 'transparent'
-            }}
-          >
-            <Activity size={15} />
-            Operations Control
-          </button>
-
-          <button
-            onClick={() => setActiveTab('merchants')}
-            className="btn btn-ghost"
-            style={{
-              padding: '6px 14px',
-              fontSize: '0.8rem',
-              background: activeTab === 'merchants' ? 'var(--bg-card-hover)' : 'transparent',
-              color: activeTab === 'merchants' ? '#38bdf8' : 'var(--text-secondary)',
-              borderColor: activeTab === 'merchants' ? 'var(--border-accent)' : 'transparent'
-            }}
-          >
-            <Database size={15} />
-            Merchant Behavioral Memory
-          </button>
-
-          <button
-            onClick={() => setActiveTab('audit')}
-            className="btn btn-ghost"
-            style={{
-              padding: '6px 14px',
-              fontSize: '0.8rem',
-              background: activeTab === 'audit' ? 'var(--bg-card-hover)' : 'transparent',
-              color: activeTab === 'audit' ? '#38bdf8' : 'var(--text-secondary)',
-              borderColor: activeTab === 'audit' ? 'var(--border-accent)' : 'transparent'
-            }}
-          >
-            <FileText size={15} />
-            Audit Trail
-          </button>
-
-          <button
-            onClick={() => setActiveTab('architecture')}
-            className="btn btn-ghost"
-            style={{
-              padding: '6px 14px',
-              fontSize: '0.8rem',
-              background: activeTab === 'architecture' ? 'var(--bg-card-hover)' : 'transparent',
-              color: activeTab === 'architecture' ? '#38bdf8' : 'var(--text-secondary)',
-              borderColor: activeTab === 'architecture' ? 'var(--border-accent)' : 'transparent'
-            }}
-          >
-            <Cpu size={15} />
-            Architecture & Evaluation
-          </button>
-        </nav>
-
-        {/* Right: Live Telemetry Status & Webhook Console & Reset */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button
-            onClick={() => onOpenWebhookModal()}
-            className="btn btn-ghost"
-            style={{ padding: '6px 12px', fontSize: '0.75rem', borderColor: 'rgba(6, 182, 212, 0.4)', color: '#06b6d4' }}
-            title="Open Razorpay Webhook Ingestion Console"
-          >
-            <Activity size={13} />
-            Razorpay Webhooks
-          </button>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', borderRadius: '8px' }}>
-            <div className="pulse-dot live" />
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#34d399' }}>
-              Stream Ingesting
-            </span>
+        {/* Right: Observability Badges & Status */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          {/* Database Badge */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '5px 10px',
+            borderRadius: '6px',
+            background: 'rgba(255, 255, 255, 0.03)',
+            border: '1px solid var(--border)',
+            fontSize: '11px',
+            color: 'var(--text-muted)'
+          }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#3b82f6' }}></span>
+            <span>PostgreSQL: <strong>{stats?.payments || 2501}</strong> payments</span>
           </div>
 
-          <button
-            onClick={onReset}
-            disabled={isResetting}
-            className="btn btn-ghost"
-            style={{ padding: '6px 12px', fontSize: '0.75rem' }}
-            title="Reset system to fresh demo state"
+          {/* AI Connection Badge */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '5px 12px',
+            borderRadius: '20px',
+            background: isGemini ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+            border: `1px solid ${isGemini ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+            fontSize: '11px',
+            fontWeight: '600',
+            color: isGemini ? '#10b981' : '#f87171'
+          }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isGemini ? '#10b981' : '#f87171' }}></span>
+            <span>AI: {isGemini ? `Gemini (${aiStatus.model || '2.0-flash'}) ● Connected` : 'AI OFFLINE (Missing Key)'}</span>
+          </div>
+
+          {/* Refresh Button */}
+          <button 
+            onClick={onRefresh}
+            style={{
+              background: 'none',
+              border: '1px solid var(--border)',
+              borderRadius: '6px',
+              padding: '5px 10px',
+              color: 'var(--text-muted)',
+              fontSize: '12px',
+              cursor: 'pointer'
+            }}
+            title="Refresh state"
           >
-            <RotateCcw size={14} className={isResetting ? "animate-spin" : ""} />
-            {isResetting ? "Resetting..." : "Reset Demo"}
+            ↻
           </button>
         </div>
 

@@ -14,7 +14,7 @@ def setup_clean_db():
     init_db()
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute("TRUNCATE TABLE audit_logs, ai_investigation_steps, ai_investigations, incidents, webhook_events, refunds, payments, orders, merchants CASCADE;")
+    c.execute("DELETE FROM audit_logs; DELETE FROM ai_investigation_steps; DELETE FROM ai_investigations; DELETE FROM incidents; DELETE FROM webhook_events; DELETE FROM refunds; DELETE FROM payments; DELETE FROM orders; DELETE FROM merchants;")
     conn.commit()
     c.close()
     conn.close()

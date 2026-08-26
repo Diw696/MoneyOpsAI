@@ -1,260 +1,205 @@
 import React, { useState, useEffect } from 'react';
 import Header from './components/Header';
-import OperationsKPIs from './components/OperationsKPIs';
-import IncidentQueue from './components/IncidentQueue';
 import InvestigationStudio from './components/InvestigationStudio';
-import MerchantBaselinesView from './components/MerchantBaselinesView';
-import AuditTrailView from './components/AuditTrailView';
-import SystemArchitectureModal from './components/SystemArchitectureModal';
-import WebhookSimulatorModal from './components/WebhookSimulatorModal';
-import {
-  fetchStats, fetchIncidents, fetchIncidentDetail, runInvestigation,
-  authorizeAction, fetchMerchants, fetchAuditLogs, resetDemo
-} from './api';
+import { fetchStats, fetchIncidents, fetchIncidentDetail, fetchAIStatus, triggerAnomalyDetection, generateLabData } from './api';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('operations');
   const [stats, setStats] = useState(null);
+  const [aiStatus, setAiStatus] = useState({ provider: 'gemini', configured: false, model: 'gemini-2.0-flash' });
   const [incidents, setIncidents] = useState([]);
-  const [selectedIncidentId, setSelectedIncidentId] = useState('INC-2841');
-  const [currentIncident, setCurrentIncident] = useState(null);
-  const [currentInvestigation, setCurrentInvestigation] = useState(null);
-  const [lastAuditEntry, setLastAuditEntry] = useState(null);
-  const [merchants, setMerchants] = useState([]);
-  const [auditLogs, setAuditLogs] = useState([]);
-  
-  const [isInvestigating, setIsInvestigating] = useState(false);
-  const [isExecutingAction, setIsExecutingAction] = useState(false);
-  const [isResetting, setIsResetting] = useState(false);
-  const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
-  const [errorMsg, setErrorMsg] = useState(null);
+  const [selectedIncident, setSelectedIncident] = useState(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [notification, setNotification] = useState(null);
 
-  // Load initial data
-  const loadDashboardData = async () => {
+  const loadData = async () => {
     try {
-      const [sData, incData] = await Promise.all([
-        fetchStats(),
-        fetchIncidents()
+      const [sData, incList, aiInfo] = await Promise.all([
+        fetchStats().catch(() => null),
+        fetchIncidents().catch(() => []),
+        fetchAIStatus().catch(() => ({ provider: 'gemini', configured: false, model: 'gemini-2.0-flash' }))
       ]);
-      setStats(sData);
-      setIncidents(incData);
 
-      if (!selectedIncidentId && incData.length > 0) {
-        setSelectedIncidentId(incData[0].incident_id);
+      setStats(sData);
+      setIncidents(incList || []);
+      setAiStatus(aiInfo || { provider: 'gemini', configured: false, model: 'gemini-2.0-flash' });
+
+      if (incList && incList.length > 0) {
+        if (!selectedIncident || !incList.some(i => i.incident_id === selectedIncident.incident_id)) {
+          setSelectedIncident(incList[0]);
+        } else {
+          const updated = incList.find(i => i.incident_id === selectedIncident.incident_id);
+          if (updated) setSelectedIncident(updated);
+        }
       }
     } catch (err) {
       console.error("Error loading dashboard data:", err);
     }
   };
 
-  const loadIncidentDetails = async (id) => {
-    if (!id) return;
-    try {
-      const detail = await fetchIncidentDetail(id);
-      setCurrentIncident(detail.incident);
-      setCurrentInvestigation(detail.latest_investigation);
-    } catch (err) {
-      console.error("Error loading incident detail:", err);
-    }
-  };
-
-  const loadMerchants = async () => {
-    try {
-      const mList = await fetchMerchants();
-      setMerchants(mList);
-    } catch (err) {
-      console.error("Error loading merchants:", err);
-    }
-  };
-
-  const loadAuditLogs = async () => {
-    try {
-      const aList = await fetchAuditLogs();
-      setAuditLogs(aList);
-    } catch (err) {
-      console.error("Error loading audit logs:", err);
-    }
-  };
-
   useEffect(() => {
-    loadDashboardData();
-    const interval = setInterval(loadDashboardData, 4000);
+    loadData();
+    const interval = setInterval(loadData, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    if (selectedIncidentId) {
-      loadIncidentDetails(selectedIncidentId);
-    }
-  }, [selectedIncidentId]);
-
-  useEffect(() => {
-    if (activeTab === 'merchants') {
-      loadMerchants();
-    } else if (activeTab === 'audit') {
-      loadAuditLogs();
-    }
-  }, [activeTab]);
-
-  const handleSelectIncident = (id) => {
-    setSelectedIncidentId(id);
-    loadIncidentDetails(id);
-  };
-
-  const handleRunInvestigation = async (id) => {
-    setIsInvestigating(true);
-    setErrorMsg(null);
+  const handleSelectIncident = async (inc) => {
+    setSelectedIncident(inc);
     try {
-      const report = await runInvestigation(id);
-      setCurrentInvestigation(report);
-      await loadDashboardData();
-    } catch (err) {
-      setErrorMsg(err.message || "Failed to complete investigation");
-    } finally {
-      setIsInvestigating(false);
+      const detailed = await fetchIncidentDetail(inc.incident_id);
+      setSelectedIncident(detailed);
+    } catch (e) {
+      console.warn("Detail fetch failed, using list object:", e);
     }
   };
 
-  const handleAuthorizeAction = async (id, approved, operatorNotes) => {
-    setIsExecutingAction(true);
-    setErrorMsg(null);
+  const handleTriggerDetection = async () => {
+    setIsDetecting(true);
+    setNotification(null);
     try {
-      const auditResult = await authorizeAction(id, approved, operatorNotes);
-      setLastAuditEntry(auditResult);
-      // Reload updated incident & dashboard stats
-      await loadIncidentDetails(id);
-      await loadDashboardData();
-      await loadAuditLogs();
-    } catch (err) {
-      setErrorMsg(err.message || "Failed to execute governed action");
+      const res = await triggerAnomalyDetection();
+      setNotification({
+        type: "success",
+        text: `Detection complete. ${res.anomalies_detected} anomalies evaluated across ${res.records_analyzed} PostgreSQL records.`
+      });
+      await loadData();
+    } catch (e) {
+      setNotification({
+        type: "error",
+        text: `Detection failed: ${e.message}`
+      });
     } finally {
-      setIsExecutingAction(false);
-    }
-  };
-
-  const handleReset = async () => {
-    setIsResetting(true);
-    try {
-      await resetDemo();
-      await loadDashboardData();
-      if (selectedIncidentId) {
-        await loadIncidentDetails(selectedIncidentId);
-      }
-      if (activeTab === 'merchants') await loadMerchants();
-      if (activeTab === 'audit') await loadAuditLogs();
-    } catch (err) {
-      console.error("Reset failed:", err);
-    } finally {
-      setIsResetting(false);
+      setIsDetecting(false);
     }
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      
-      {/* Platform Header */}
-      <Header
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        onReset={handleReset}
-        isResetting={isResetting}
-        onOpenWebhookModal={() => setIsWebhookModalOpen(true)}
-      />
+    <div className="app-container" style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
+      {/* Top Header */}
+      <Header stats={stats} aiStatus={aiStatus} onRefresh={loadData} />
 
-      {/* Razorpay Webhook Ingestion Simulator Modal */}
-      <WebhookSimulatorModal
-        isOpen={isWebhookModalOpen}
-        onClose={() => setIsWebhookModalOpen(false)}
-        onWebhookSent={async () => {
-          await loadDashboardData();
-          if (selectedIncidentId) await loadIncidentDetails(selectedIncidentId);
-        }}
-      />
+      {notification && (
+        <div style={{
+          margin: "12px 24px 0",
+          padding: "10px 16px",
+          borderRadius: "6px",
+          fontSize: "13px",
+          background: notification.type === "success" ? "rgba(16, 185, 129, 0.1)" : "rgba(239, 68, 68, 0.1)",
+          border: `1px solid ${notification.type === "success" ? "rgba(16, 185, 129, 0.3)" : "rgba(239, 68, 68, 0.3)"}`,
+          color: notification.type === "success" ? "#10b981" : "#f87171",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
+        }}>
+          <span>{notification.text}</span>
+          <button onClick={() => setNotification(null)} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer" }}>✕</button>
+        </div>
+      )}
 
-      {/* Main Container */}
-      <main className="container" style={{ padding: '24px 20px', flex: 1 }}>
+      {/* Main Workspace Layout */}
+      <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: "24px", padding: "24px", maxWidth: "1600px", margin: "0 auto" }}>
         
-        {/* Error Alert Bar */}
-        {errorMsg && (
-          <div style={{
-            background: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid #ef4444',
-            borderRadius: '8px',
-            padding: '10px 16px',
-            color: '#fca5a5',
-            fontSize: '0.85rem',
-            marginBottom: '16px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between'
-          }}>
-            <span><strong>Alert:</strong> {errorMsg}</span>
-            <button onClick={() => setErrorMsg(null)} className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: '0.7rem' }}>
-              Dismiss
-            </button>
-          </div>
-        )}
+        {/* LEFT: Incident Queue */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div className="card" style={{ padding: "18px 20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+              <h3 style={{ fontSize: "15px", fontWeight: "600", color: "var(--text)", margin: 0 }}>
+                🚨 Active Incidents ({incidents.length})
+              </h3>
+              <button 
+                onClick={handleTriggerDetection} 
+                disabled={isDetecting}
+                style={{ 
+                  padding: "4px 10px", 
+                  fontSize: "11px", 
+                  borderRadius: "4px", 
+                  background: "rgba(99, 102, 241, 0.15)", 
+                  border: "1px solid rgba(99, 102, 241, 0.4)", 
+                  color: "var(--primary)", 
+                  cursor: "pointer",
+                  fontWeight: "600"
+                }}
+              >
+                {isDetecting ? "Scanning..." : "↻ Scan ML"}
+              </button>
+            </div>
 
-        {/* Tab 1: Operations Control Dashboard */}
-        {activeTab === 'operations' && (
-          <div>
-            <OperationsKPIs stats={stats} />
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {incidents.length === 0 ? (
+                <div style={{ padding: "20px", textAlign: "center", color: "var(--text-muted)", fontSize: "13px" }}>
+                  ✓ Zero active incidents. All banking gateways within normal operational baselines.
+                </div>
+              ) : (
+                incidents.map((inc) => {
+                  const isSelected = selectedIncident?.incident_id === inc.incident_id;
+                  return (
+                    <div
+                      key={inc.incident_id}
+                      onClick={() => handleSelectIncident(inc)}
+                      style={{
+                        padding: "14px",
+                        borderRadius: "8px",
+                        border: isSelected ? "1.5px solid var(--primary)" : "1px solid var(--border)",
+                        background: isSelected ? "rgba(99, 102, 241, 0.08)" : "rgba(255, 255, 255, 0.02)",
+                        cursor: "pointer",
+                        transition: "all 0.15s ease"
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                        <span className={`badge badge-${inc.severity || 'critical'}`} style={{ fontSize: "10px", fontWeight: "700" }}>
+                          {inc.severity?.toUpperCase() || 'CRITICAL'}
+                        </span>
+                        <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "monospace" }}>
+                          {inc.incident_id}
+                        </span>
+                      </div>
+                      
+                      <div style={{ fontSize: "13px", fontWeight: "600", color: "var(--text)", marginBottom: "6px" }}>
+                        {inc.title}
+                      </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: '20px', alignItems: 'start' }}>
-              {/* Left Column: Active Incidents Queue */}
-              <IncidentQueue
-                incidents={incidents}
-                selectedIncidentId={selectedIncidentId}
-                onSelectIncident={handleSelectIncident}
-                isInvestigating={isInvestigating}
-              />
-
-              {/* Right Column: Deep Investigation Studio */}
-              <InvestigationStudio
-                incident={currentIncident}
-                investigation={currentInvestigation}
-                onRunInvestigation={handleRunInvestigation}
-                isInvestigating={isInvestigating}
-                onAuthorizeAction={handleAuthorizeAction}
-                isExecutingAction={isExecutingAction}
-                lastAuditEntry={lastAuditEntry}
-              />
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--text-muted)" }}>
+                        <span>Exposure: <strong style={{ color: "#f87171" }}>₹{(inc.potential_exposure || 0).toLocaleString('en-IN')}</strong></span>
+                        <span>Score: <strong style={{ color: "var(--primary)" }}>{inc.anomaly_score?.toFixed(2) || '1.00'}</strong></span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
-        )}
 
-        {/* Tab 2: Merchant Behavioral Baselines */}
-        {activeTab === 'merchants' && (
-          <MerchantBaselinesView merchants={merchants} />
-        )}
-
-        {/* Tab 3: Governed Audit Trail */}
-        {activeTab === 'audit' && (
-          <AuditTrailView auditLogs={auditLogs} />
-        )}
-
-        {/* Tab 4: System Architecture & Judgment */}
-        {activeTab === 'architecture' && (
-          <SystemArchitectureModal />
-        )}
-
-      </main>
-
-      {/* Footer */}
-      <footer style={{
-        borderTop: '1px solid var(--border-subtle)',
-        padding: '16px 0',
-        textAlign: 'center',
-        fontSize: '0.75rem',
-        color: 'var(--text-muted)',
-        background: 'rgba(10, 14, 23, 0.9)'
-      }}>
-        <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span>MoneyOps AI — Built for Razorpay Internship (Open Track AI)</span>
-          <span className="mono">Data Engineering + Unsupervised ML + Money Graph + Case Memory + 3-Tier Governance</span>
+          {/* Database Provenance Box */}
+          <div className="card" style={{ padding: "16px 20px", fontSize: "12px", color: "var(--text-muted)" }}>
+            <div style={{ fontWeight: "600", color: "var(--text)", marginBottom: "8px" }}>📦 Database Observability</div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+              <span>Database</span>
+              <strong style={{ color: "var(--text)" }}>PostgreSQL 18</strong>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+              <span>Payments Analyzed</span>
+              <strong style={{ color: "var(--text)" }}>{stats?.payments || 0}</strong>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+              <span>Orders Stored</span>
+              <strong style={{ color: "var(--text)" }}>{stats?.orders || 0}</strong>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span>Webhooks Verified</span>
+              <strong style={{ color: "var(--text)" }}>{stats?.webhook_events || 0}</strong>
+            </div>
+          </div>
         </div>
-      </footer>
 
+        {/* RIGHT: Investigation Studio */}
+        <div>
+          <InvestigationStudio 
+            incident={selectedIncident} 
+            aiStatus={aiStatus} 
+            onRefresh={loadData} 
+          />
+        </div>
+
+      </div>
     </div>
   );
 }

@@ -1,8 +1,20 @@
 const API_BASE = "http://localhost:8000/api";
 
+export async function fetchAIStatus() {
+  const res = await fetch(`${API_BASE}/ai/status`);
+  if (!res.ok) throw new Error("Failed to fetch AI status");
+  return res.json();
+}
+
 export async function fetchStats() {
   const res = await fetch(`${API_BASE}/stats`);
   if (!res.ok) throw new Error("Failed to fetch operational stats");
+  return res.json();
+}
+
+export async function fetchSourceStats() {
+  const res = await fetch(`${API_BASE}/stats/sources`);
+  if (!res.ok) throw new Error("Failed to fetch source distribution");
   return res.json();
 }
 
@@ -25,48 +37,45 @@ export async function runInvestigation(incidentId) {
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || "Investigation failed");
+    const msg = typeof err.detail === "object" ? err.detail.message : (err.detail || "Investigation failed");
+    throw new Error(msg);
   }
   return res.json();
 }
 
-export async function authorizeAction(incidentId, approved, operatorNotes = "Authorized per FinOps Policy", authorizedBy = "FinOps_Lead") {
-  const res = await fetch(`${API_BASE}/incidents/${incidentId}/action`, {
+export async function fetchInvestigation(investigationId) {
+  const res = await fetch(`${API_BASE}/investigations/${investigationId}`);
+  if (!res.ok) throw new Error("Failed to fetch investigation");
+  return res.json();
+}
+
+export async function fetchInvestigationSteps(investigationId) {
+  const res = await fetch(`${API_BASE}/investigations/${investigationId}/steps`);
+  if (!res.ok) throw new Error("Failed to fetch investigation steps");
+  return res.json();
+}
+
+export async function fetchIncidentInvestigations(incidentId) {
+  const res = await fetch(`${API_BASE}/incidents/${incidentId}/investigations`);
+  if (!res.ok) throw new Error("Failed to fetch incident investigations");
+  return res.json();
+}
+
+export async function triggerAnomalyDetection() {
+  const res = await fetch(`${API_BASE}/anomalies/detect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+  if (!res.ok) throw new Error("Failed to trigger anomaly detection");
+  return res.json();
+}
+
+export async function generateLabData(payload = { seed: 42, payments: 2500, merchants: 10, anomaly: "gateway_spike" }) {
+  const res = await fetch(`${API_BASE}/incident-lab/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      approved,
-      operator_notes: operatorNotes,
-      authorized_by: authorizedBy
-    })
+    body: JSON.stringify(payload)
   });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || "Action execution failed");
-  }
-  return res.json();
-}
-
-export async function fetchMerchants() {
-  const res = await fetch(`${API_BASE}/merchants`);
-  if (!res.ok) throw new Error("Failed to fetch merchants");
-  return res.json();
-}
-
-export async function fetchGraph(targetId) {
-  const res = await fetch(`${API_BASE}/graph/${targetId}`);
-  if (!res.ok) throw new Error("Failed to fetch entity graph");
-  return res.json();
-}
-
-export async function fetchAuditLogs() {
-  const res = await fetch(`${API_BASE}/audit`);
-  if (!res.ok) throw new Error("Failed to fetch audit logs");
-  return res.json();
-}
-
-export async function resetDemo() {
-  const res = await fetch(`${API_BASE}/reset`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to reset system");
+  if (!res.ok) throw new Error("Failed to generate laboratory dataset");
   return res.json();
 }
