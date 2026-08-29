@@ -65,7 +65,7 @@ class GeminiInvestigationAgent:
     Investigates financial incidents against PostgreSQL using strict evidence retrieval.
     """
 
-    def __init__(self, max_turns: int = 8, timeout_sec: float = 40.0):
+    def __init__(self, max_turns: int = 8, timeout_sec: float = 90.0):
         self.max_turns = max_turns
         self.timeout_sec = timeout_sec
 

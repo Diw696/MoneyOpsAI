@@ -16,6 +16,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
   const [investigationData, setInvestigationData] = useState(null);
   const [steps, setSteps] = useState([]);
   const [similarCases, setSimilarCases] = useState([]);
+  const [similarCasesError, setSimilarCasesError] = useState(null);
   const [expandedStep, setExpandedStep] = useState(null);
   const [showMerchants, setShowMerchants] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -35,36 +36,12 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
   const loadSimilarCases = async (incId) => {
     try {
       const cases = await fetchSimilarIncidents(incId);
-      if (cases && cases.length > 0) {
-        setSimilarCases(cases);
-      } else {
-        setSimilarCases([
-          {
-            historical_incident_id: "INC-HIST-001",
-            title: "Gateway_X Upstream Connection Pool Exhaustion (Resolved)",
-            similarity_score_pct: 96.0,
-            match_tier: "HIGH MATCH",
-            historical_root_cause: "Upstream banking partner connection pool exhaustion on HTTP Keep-Alive sockets during peak morning batch clearing.",
-            previous_action: "Rerouted 100% traffic away from Gateway_X to Gateway_SBI and Gateway_ICICI. Notified partner NOC.",
-            outcome: "Failure rate dropped from 18.4% to 2.2% within 8 minutes. Zero customer refunds required.",
-            provenance: "incident_lab (Historical Simulation Case)"
-          }
-        ]);
-      }
+      setSimilarCases(cases && cases.length > 0 ? cases : []);
+      setSimilarCasesError(null);
     } catch (e) {
       console.warn("Could not load similar cases:", e);
-      setSimilarCases([
-        {
-          historical_incident_id: "INC-HIST-001",
-          title: "Gateway_X Upstream Connection Pool Exhaustion (Resolved)",
-          similarity_score_pct: 96.0,
-          match_tier: "HIGH MATCH",
-          historical_root_cause: "Upstream banking partner connection pool exhaustion on HTTP Keep-Alive sockets during peak morning batch clearing.",
-          previous_action: "Rerouted 100% traffic away from Gateway_X to Gateway_SBI and Gateway_ICICI. Notified partner NOC.",
-          outcome: "Failure rate dropped from 18.4% to 2.2% within 8 minutes. Zero customer refunds required.",
-          provenance: "incident_lab (Historical Simulation Case)"
-        }
-      ]);
+      setSimilarCases([]);
+      setSimilarCasesError("Case-memory similarity lookup failed — no similar incidents could be retrieved.");
     }
   };
 
@@ -210,13 +187,13 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
   const isGeminiConnected = aiStatus?.configured;
   const primaryAction = actions.length > 0 ? actions[0] : null;
 
-  const failureRate = incident.evidence?.failure_rate_pct ?? (incident.failure_rate ? (incident.failure_rate * 100).toFixed(2) : '19.08');
-  const peerRate = incident.evidence?.peer_failure_rate_pct ?? (incident.peer_failure_rate ? (incident.peer_failure_rate * 100).toFixed(2) : '3.52');
-  const ratio = incident.evidence?.failure_rate_ratio ?? (Number(peerRate) > 0 ? (Number(failureRate) / Number(peerRate)).toFixed(2) : '5.42');
-  const topErrors = incident.evidence?.top_failure_code_count ?? 74;
-  const totalFailed = incident.evidence?.failed_payments_count ?? (incident.affected_payments || 87);
-  const exposureAmt = investigationData?.estimated_exposure ?? (incident.potential_exposure || 158842.85);
-  const merchantCount = incident.affected_merchants || 10;
+  const failureRate = incident.evidence?.failure_rate_pct ?? (incident.failure_rate ? (incident.failure_rate * 100).toFixed(2) : null);
+  const peerRate = incident.evidence?.peer_failure_rate_pct ?? (incident.peer_failure_rate ? (incident.peer_failure_rate * 100).toFixed(2) : null);
+  const ratio = incident.evidence?.failure_rate_ratio ?? (peerRate && Number(peerRate) > 0 && failureRate ? (Number(failureRate) / Number(peerRate)).toFixed(2) : null);
+  const topErrors = incident.evidence?.top_failure_code_count ?? null;
+  const totalFailed = incident.evidence?.failed_payments_count ?? (incident.affected_payments || null);
+  const exposureAmt = investigationData?.estimated_exposure ?? (incident.potential_exposure || null);
+  const merchantCount = incident.affected_merchants || null;
 
   let affectedMerchantsList = [];
   if (investigationData?.affected_entities_json) {
@@ -227,10 +204,10 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
     }
   }
 
-  // Calculate evidence confidence percentage (deterministic)
-  const evidenceScore = investigationData?.confidence 
-    ? Math.round(investigationData.confidence * 100) 
-    : 94;
+  // Evidence confidence is only shown once a real investigation has computed it — never a placeholder guess.
+  const evidenceScore = investigationData?.confidence != null
+    ? Math.round(investigationData.confidence * 100)
+    : null;
 
   const topSimilarCase = similarCases.length > 0 ? similarCases[0] : null;
 
@@ -301,7 +278,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
               What Happened
             </div>
             <p style={{ margin: 0, fontSize: '15px', lineHeight: '1.6', color: 'var(--text)' }}>
-              {investigationData?.what_happened || incident.description || "Payment failures on Gateway_X surged to 19.08%, which is 5.42x higher than the peer gateway baseline of 3.52%."}
+              {investigationData?.what_happened || incident.description || "No description recorded for this incident yet."}
             </p>
           </div>
 
@@ -313,7 +290,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
               Why Did It Happen? (Root Cause)
             </div>
             <p style={{ margin: 0, fontSize: '15px', lineHeight: '1.6', color: 'var(--text)' }}>
-              {investigationData?.why_it_happened || incident.primary_signal || "The failures are heavily concentrated around upstream banking timeouts (GATEWAY_TIMEOUT accounting for 85.06% of failures), indicating upstream gateway degradation."}
+              {investigationData?.why_it_happened || incident.primary_signal || "Root cause not yet determined — run \"Investigate with Gemini\" above."}
             </p>
           </div>
 
@@ -326,17 +303,17 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
         <div className="card" style={{ padding: '18px 20px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>FAILURE RATE</div>
           <div style={{ fontSize: '24px', fontWeight: '800', color: '#f87171', marginTop: '6px' }}>
-            {failureRate}%
+            {failureRate != null ? `${failureRate}%` : '—'}
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {ratio}x peer baseline
+            {ratio != null ? `${ratio}x peer baseline` : 'No evidence recorded'}
           </div>
         </div>
 
         <div className="card" style={{ padding: '18px 20px' }}>
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>PEER BASELINE</div>
           <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text)', marginTop: '6px' }}>
-            {peerRate}%
+            {peerRate != null ? `${peerRate}%` : '—'}
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
             Healthy peer average
@@ -346,17 +323,17 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
         <div className="card" style={{ padding: '18px 20px' }}>
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>GATEWAY TIMEOUTS</div>
           <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text)', marginTop: '6px' }}>
-            {topErrors} / {totalFailed}
+            {topErrors != null && totalFailed != null ? `${topErrors} / ${totalFailed}` : '—'}
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            85.06% error concentration
+            {topErrors != null && totalFailed ? `${((topErrors / totalFailed) * 100).toFixed(2)}% error concentration` : 'No evidence recorded'}
           </div>
         </div>
 
         <div className="card" style={{ padding: '18px 20px' }}>
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>AFFECTED MERCHANTS</div>
           <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text)', marginTop: '6px' }}>
-            {merchantCount}
+            {merchantCount != null ? merchantCount : '—'}
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
             Impacted across categories
@@ -366,7 +343,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
         <div className="card" style={{ padding: '18px 20px' }}>
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>POTENTIAL EXPOSURE</div>
           <div style={{ fontSize: '24px', fontWeight: '800', color: '#f87171', marginTop: '6px' }}>
-            ₹{Number(exposureAmt).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            {exposureAmt != null ? `₹${Number(exposureAmt).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
             Unresolved transaction value
@@ -389,7 +366,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
 
           {topSimilarCase && (
             <span style={{ fontSize: '12px', fontWeight: '700', color: '#10b981' }}>
-              🎯 Top Match: {topSimilarCase.similarity_score_pct}% Similarity ({topSimilarCase.match_tier})
+              🎯 Top Match: {topSimilarCase.similarity_score_pct}% match ({topSimilarCase.match_tier}) — category + semantic signals
             </span>
           )}
         </div>
@@ -411,6 +388,16 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
               </span>
             </div>
 
+            {topSimilarCase.factors && (
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '10px 0', padding: '10px 12px', background: 'rgba(0,0,0,0.25)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                <div style={{ fontWeight: '700', color: 'var(--text)', marginBottom: '6px' }}>
+                  {topSimilarCase.similarity_score_pct}% is a weighted composite, not raw semantic similarity — breakdown:
+                </div>
+                <div>Raw embedding cosine similarity: <strong>{topSimilarCase.cosine_similarity}</strong> (contributes {topSimilarCase.factors.cosine_sim_contrib} pts)</div>
+                <div>Incident type match: {topSimilarCase.factors.type_match} pts · Entity match: {topSimilarCase.factors.entity_match} pts · Error code match: {topSimilarCase.factors.error_code_match} pts · Severity match: {topSimilarCase.factors.severity_match} pts</div>
+              </div>
+            )}
+
             <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.5', marginTop: '6px' }}>
               <div><strong>Historical Root Cause:</strong> {topSimilarCase.historical_root_cause}</div>
               <div style={{ marginTop: '4px' }}><strong>Previous Action Taken:</strong> {topSimilarCase.previous_action}</div>
@@ -418,8 +405,8 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
             </div>
           </div>
         ) : (
-          <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-            Searching Case Memory in PostgreSQL for historical resolved precedents...
+          <div style={{ fontSize: '13px', color: similarCasesError ? '#f87171' : 'var(--text-muted)' }}>
+            {similarCasesError || 'No similar historical incidents found in Case Memory for this incident.'}
           </div>
         )}
       </div>
@@ -429,7 +416,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <span style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text)' }}>
-              👥 Affected Merchants: <strong>{merchantCount} merchants</strong>
+              👥 Affected Merchants: <strong>{merchantCount != null ? `${merchantCount} merchants` : 'No evidence recorded'}</strong>
             </span>
             <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '12px' }}>
               Impacted across SaaS, Gaming, Travel, and Quick Commerce
@@ -474,18 +461,20 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
               EVIDENCE CONFIDENCE
             </span>
             <span style={{ fontSize: '16px', fontWeight: '800', color: '#60a5fa' }}>
-              {evidenceScore}% • VERY HIGH
+              {evidenceScore != null ? `${evidenceScore}% • ${evidenceScore >= 80 ? 'VERY HIGH' : evidenceScore >= 60 ? 'HIGH' : evidenceScore >= 40 ? 'MODERATE' : 'LOW'}` : 'Not yet computed'}
             </span>
           </div>
           <p style={{ margin: '8px 0 10px 0', fontSize: '13px', lineHeight: '1.5', color: 'var(--text)' }}>
-            Evidence confidence is derived deterministically from 5 independent database and anomaly signals:
+            {evidenceScore != null
+              ? 'Evidence confidence is derived deterministically from 5 independent database and anomaly signals:'
+              : 'Run "Investigate with Gemini" to compute evidence confidence from real signals.'}
           </p>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <div>• <strong>Anomaly Strength (25%):</strong> IsolationForest score 1.0 (Flagged Anomaly)</div>
-            <div>• <strong>Peer Deviation (25%):</strong> 19.08% failure rate is 5.42x peer baseline (3.52%)</div>
-            <div>• <strong>Error Concentration (20%):</strong> 85.06% share of failures are GATEWAY_TIMEOUT</div>
-            <div>• <strong>Sample Volume (15%):</strong> 87 failed transactions analyzed</div>
-            <div>• <strong>Merchant Breadth (15%):</strong> Failures corroborated across 10 distinct merchants</div>
+            <div>• <strong>Anomaly Strength (25%):</strong> IsolationForest score {incident.anomaly_score != null ? incident.anomaly_score : '—'} (Flagged Anomaly)</div>
+            <div>• <strong>Peer Deviation (25%):</strong> {failureRate != null && ratio != null && peerRate != null ? `${failureRate}% failure rate is ${ratio}x peer baseline (${peerRate}%)` : 'No evidence recorded'}</div>
+            <div>• <strong>Error Concentration (20%):</strong> {topErrors != null && totalFailed ? `${((topErrors / totalFailed) * 100).toFixed(2)}% share of failures are GATEWAY_TIMEOUT` : 'No evidence recorded'}</div>
+            <div>• <strong>Sample Volume (15%):</strong> {totalFailed != null ? `${totalFailed} failed transactions analyzed` : 'No evidence recorded'}</div>
+            <div>• <strong>Merchant Breadth (15%):</strong> {merchantCount != null ? `Failures corroborated across ${merchantCount} distinct merchants` : 'No evidence recorded'}</div>
           </div>
         </div>
 
@@ -500,7 +489,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
             </span>
           </div>
           <p style={{ margin: '8px 0 0 0', fontSize: '14px', lineHeight: '1.6', color: 'var(--text)' }}>
-            {investigationData?.recommendation || "Temporarily reroute traffic away from Gateway_X to healthy peer gateways (SBI / ICICI / HDFC) and alert banking partner regarding upstream timeout degradation."}
+            {investigationData?.recommendation || "No AI recommendation yet — run \"Investigate with Gemini\" above to generate one from real evidence."}
           </p>
         </div>
 
@@ -536,7 +525,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
             Reroute traffic away from <code style={{ color: '#f87171' }}>{incident.target_entity_id || 'Gateway_X'}</code>
           </div>
           <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '14px' }}>
-            <strong>Policy Reason:</strong> High failure concentration on Gateway_X ({failureRate}%) relative to peer baseline ({peerRate}%). Reroutes checkout traffic to healthy peer gateways.
+            <strong>Policy Reason:</strong> High failure concentration on Gateway_X ({failureRate != null ? `${failureRate}%` : 'no evidence'}) relative to peer baseline ({peerRate != null ? `${peerRate}%` : 'no evidence'}). Reroutes checkout traffic to healthy peer gateways.
           </div>
 
           {/* Action Control Buttons */}

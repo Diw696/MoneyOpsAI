@@ -12,6 +12,9 @@ backend/data/*.sqlite3
 *.sqlite
 *.sqlite3
 
+# Local Postgres backups (may contain real/test transaction data)
+backend/data/backups/
+
 # Python
 venv/
 .venv/

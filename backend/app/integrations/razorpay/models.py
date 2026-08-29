@@ -1,5 +1,10 @@
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any, List, Union
+from pydantic import BaseModel, Field, field_validator
+
+def clean_notes(v: Any) -> Dict[str, Any]:
+    if isinstance(v, dict):
+        return v
+    return {}
 
 class RazorpayPaymentEntity(BaseModel):
     id: str
@@ -21,7 +26,7 @@ class RazorpayPaymentEntity(BaseModel):
     vpa: Optional[str] = None
     email: Optional[str] = None
     contact: Optional[str] = None
-    notes: Dict[str, Any] = Field(default_factory=dict)
+    notes: Union[Dict[str, Any], List[Any]] = Field(default_factory=dict)
     fee: Optional[int] = None
     tax: Optional[int] = None
     error_code: Optional[str] = None
@@ -31,6 +36,11 @@ class RazorpayPaymentEntity(BaseModel):
     error_reason: Optional[str] = None
     acquirer_data: Dict[str, Any] = Field(default_factory=dict)
     created_at: int  # Unix timestamp
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def validate_notes(cls, v: Any) -> Dict[str, Any]:
+        return clean_notes(v)
 
 class RazorpayOrderEntity(BaseModel):
     id: str
@@ -42,8 +52,13 @@ class RazorpayOrderEntity(BaseModel):
     receipt: Optional[str] = None
     status: str  # created, attempted, paid
     attempts: Optional[int] = 0
-    notes: Dict[str, Any] = Field(default_factory=dict)
+    notes: Union[Dict[str, Any], List[Any]] = Field(default_factory=dict)
     created_at: int
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def validate_notes(cls, v: Any) -> Dict[str, Any]:
+        return clean_notes(v)
 
 class RazorpayRefundEntity(BaseModel):
     id: str
@@ -51,7 +66,7 @@ class RazorpayRefundEntity(BaseModel):
     amount: int  # in paise
     currency: str = "INR"
     payment_id: str
-    notes: Dict[str, Any] = Field(default_factory=dict)
+    notes: Union[Dict[str, Any], List[Any]] = Field(default_factory=dict)
     receipt: Optional[str] = None
     acquirer_data: Dict[str, Any] = Field(default_factory=dict)
     created_at: int
@@ -59,6 +74,11 @@ class RazorpayRefundEntity(BaseModel):
     status: str  # pending, processed, failed
     speed_processed: Optional[str] = "normal"
     speed_requested: Optional[str] = "normal"
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def validate_notes(cls, v: Any) -> Dict[str, Any]:
+        return clean_notes(v)
 
 class RazorpayCollectionResponse(BaseModel):
     entity: str = "collection"

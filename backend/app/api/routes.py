@@ -14,8 +14,10 @@ from app.integrations.razorpay.mapper import RazorpayMapper
 from app.integrations.razorpay.exceptions import RazorpayAuthError
 from app.engine.gemini_agent import gemini_agent
 from app.engine.action_governor import action_governor
+from app.engine.batch_evaluator import batch_evaluator
 
 router = APIRouter()
+
 
 # =============================================================================
 # HEALTH & SYSTEM STATUS
@@ -93,6 +95,9 @@ def get_source_distribution():
     c.execute("SELECT source, COUNT(*) as count FROM payments GROUP BY source ORDER BY count DESC;")
     payments_by_source = {r["source"]: r["count"] for r in c.fetchall()}
 
+    c.execute("SELECT source, COUNT(*) as count FROM payments WHERE status = 'captured' GROUP BY source ORDER BY count DESC;")
+    payments_captured_by_source = {r["source"]: r["count"] for r in c.fetchall()}
+
     c.execute("SELECT source, COUNT(*) as count FROM orders GROUP BY source ORDER BY count DESC;")
     orders_by_source = {r["source"]: r["count"] for r in c.fetchall()}
 
@@ -107,6 +112,7 @@ def get_source_distribution():
 
     return {
         "payments": payments_by_source,
+        "payments_captured": payments_captured_by_source,
         "orders": orders_by_source,
         "refunds": refunds_by_source,
         "webhooks": webhooks_by_source
@@ -133,10 +139,11 @@ def sync_razorpay_data():
         }
 
     try:
-        # 1. Fetch from Razorpay Test Mode APIs
-        orders = razorpay_client.fetch_orders(count=20)
-        payments = razorpay_client.fetch_payments(count=20)
-        refunds = razorpay_client.fetch_refunds(count=20)
+        # 1. Fetch from Razorpay Test Mode APIs (paginated up to 500 records)
+        orders = razorpay_client.fetch_all_orders(max_items=500)
+        payments = razorpay_client.fetch_all_payments(max_items=500)
+        refunds = razorpay_client.fetch_all_refunds(max_items=500)
+
 
         # 2. Convert to CanonicalEvents
         canonical_events: List[CanonicalEvent] = []
@@ -558,5 +565,16 @@ def list_incident_actions(incident_id: str):
 def list_audit_logs(limit: int = 50):
     """Retrieves the immutable append-only audit trail logs from PostgreSQL."""
     return action_governor.list_audit_logs(limit=limit)
+
+@router.get("/evaluation")
+def get_batch_evaluation():
+    """Retrieves batch-level evaluation metrics and ground-truth comparison from PostgreSQL."""
+    return batch_evaluator.get_evaluation_summary()
+
+@router.post("/evaluation/run")
+def run_batch_evaluation():
+    """Triggers a full batch evaluation run across 20 labeled ground-truth scenarios."""
+    return batch_evaluator.run_full_evaluation()
+
 
 

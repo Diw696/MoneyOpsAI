@@ -96,12 +96,10 @@ class ActionGovernor:
         c.execute("""
             INSERT INTO audit_logs (
                 audit_id, action_id, incident_id, investigation_id, action_type,
-                action_name, action_tier, approval_status,
                 previous_status, new_status, actor, reason, evidence_json, timestamp
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending_approval', NULL, 'pending_approval', %s, %s, %s, %s);
+            ) VALUES (%s, %s, %s, %s, %s, NULL, 'pending_approval', %s, %s, %s, %s);
         """, (
             audit_id, action_id, incident_id, investigation_id, action_type,
-            action_type, risk_level,
             actor, f"Proposed {action_type} for {target_entity}: {reason}", evidence_json, now_str
         ))
 
@@ -169,12 +167,11 @@ class ActionGovernor:
         c.execute("""
             INSERT INTO audit_logs (
                 audit_id, action_id, incident_id, investigation_id, action_type,
-                action_name, action_tier, approval_status,
                 previous_status, new_status, actor, reason, timestamp
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'approved', 'pending_approval', 'approved', %s, %s, %s);
+            ) VALUES (%s, %s, %s, %s, %s, 'pending_approval', 'approved', %s, %s, %s);
         """, (
             audit_id, action_id, action["incident_id"], action["investigation_id"],
-            action["action_type"], action["action_type"], action["risk_level"],
+            action["action_type"],
             actor, operator_notes, now_str
         ))
 
@@ -231,12 +228,11 @@ class ActionGovernor:
         c.execute("""
             INSERT INTO audit_logs (
                 audit_id, action_id, incident_id, investigation_id, action_type,
-                action_name, action_tier, approval_status,
                 previous_status, new_status, actor, reason, timestamp
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'rejected', %s, 'rejected', %s, %s, %s);
+            ) VALUES (%s, %s, %s, %s, %s, %s, 'rejected', %s, %s, %s);
         """, (
             audit_id, action_id, action["incident_id"], action["investigation_id"],
-            action["action_type"], action["action_type"], action["risk_level"],
+            action["action_type"],
             curr_status, actor, reason, now_str
         ))
 
@@ -334,12 +330,11 @@ class ActionGovernor:
         c.execute("""
             INSERT INTO audit_logs (
                 audit_id, action_id, incident_id, investigation_id, action_type,
-                action_name, action_tier, approval_status,
                 previous_status, new_status, actor, reason, execution_result_json, timestamp
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'executed', %s, 'executed', %s, %s, %s, %s);
+            ) VALUES (%s, %s, %s, %s, %s, %s, 'executed', %s, %s, %s, %s);
         """, (
             audit_id, action_id, action["incident_id"], action["investigation_id"],
-            action["action_type"], action["action_type"], action["risk_level"],
+            action["action_type"],
             curr_status, actor, "Executed safe demonstration simulation",
             result_json, now_str
         ))

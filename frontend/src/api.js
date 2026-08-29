@@ -199,4 +199,20 @@ export async function fetchSimilarIncidents(incidentId) {
   return res.json();
 }
 
+export async function fetchEvaluation() {
+  const res = await fetch(`${API_BASE}/evaluation`);
+  if (!res.ok) throw new Error("Failed to fetch evaluation metrics");
+  return res.json();
+}
+
+export async function runBatchEvaluation() {
+  const res = await fetch(`${API_BASE}/evaluation/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+  if (!res.ok) throw new Error("Failed to execute batch evaluation");
+  return res.json();
+}
+
+
 

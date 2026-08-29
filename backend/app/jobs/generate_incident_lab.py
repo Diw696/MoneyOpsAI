@@ -10,17 +10,22 @@ def main():
     parser.add_argument("--payments", type=int, default=1000, help="Number of payments to generate")
     parser.add_argument("--merchants", type=int, default=10, help="Number of merchants to configure")
     parser.add_argument("--anomaly", type=str, default="none", choices=["none", "gateway_spike", "refund_spike", "duplicate_refund", "webhook_retry"], help="Controlled anomaly to inject")
-    parser.add_argument("--clean", action="store_true", help="Truncate tables before generation (preserves schema)")
+    parser.add_argument("--clean", action="store_true", help="Truncate incident-lab tables before generation (requires explicit --force-clean)")
+    parser.add_argument("--force-clean", action="store_true", help="Explicit confirmation before destructive truncate")
 
     args = parser.parse_args()
+
+    if args.clean and not args.force_clean:
+        print("[SAFE GUARD] --clean requires --force-clean. Refusing to truncate tables.")
+        sys.exit(2)
 
     print("=" * 65)
     print(" MONEYOPS AI — INCIDENT LAB REPRODUCIBLE GENERATOR")
     print("=" * 65)
-    print(f" Config: Seed={args.seed} | Payments={args.payments} | Merchants={args.merchants} | Anomaly={args.anomaly}")
-    
+    print(f" Config: Seed={args.seed} | Payments={args.payments} | Merchants={args.merchants} | Anomaly={args.anomaly} | Clean={args.clean}")
+
     init_db()
-    
+
     if args.clean:
         print(" Cleaning existing database records...")
         conn = get_db_connection()

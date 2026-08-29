@@ -124,18 +124,6 @@ def init_db():
     cursor.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS primary_signal TEXT;")
     cursor.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS evidence_json TEXT;")
 
-    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS action_id VARCHAR(100);")
-    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS action_type VARCHAR(100);")
-    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50);")
-    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS new_status VARCHAR(50);")
-    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS reason TEXT;")
-    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS evidence_json TEXT;")
-    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS execution_result_json TEXT;")
-
-    cursor.execute("ALTER TABLE audit_logs ALTER COLUMN action_name DROP NOT NULL;")
-    cursor.execute("ALTER TABLE audit_logs ALTER COLUMN action_tier DROP NOT NULL;")
-    cursor.execute("ALTER TABLE audit_logs ALTER COLUMN approval_status DROP NOT NULL;")
-
     # 7. AI Investigations Table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS ai_investigations (
@@ -208,6 +196,68 @@ def init_db():
     );
     """)
 
+    # Alter audit_logs for columns added since its original schema version.
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS action_id VARCHAR(100);")
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS action_type VARCHAR(100);")
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS previous_status VARCHAR(50);")
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS new_status VARCHAR(50);")
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS reason TEXT;")
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS evidence_json TEXT;")
+    cursor.execute("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS execution_result_json TEXT;")
+
+    # These three columns only exist on databases upgraded from an older schema
+    # version; a freshly created audit_logs table never has them, so guard each
+    # ALTER so init_db() stays idempotent on both fresh and upgraded databases.
+    for legacy_column in ("action_name", "action_tier", "approval_status"):
+        cursor.execute(f"""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'audit_logs' AND column_name = '{legacy_column}'
+                ) THEN
+                    ALTER TABLE audit_logs ALTER COLUMN {legacy_column} DROP NOT NULL;
+                END IF;
+            END $$;
+        """)
+
+    # 11. Evaluation Ground Truth Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS eval_ground_truth (
+        evaluation_id VARCHAR(100) PRIMARY KEY,
+        scenario_id VARCHAR(100) NOT NULL,
+        scenario_type VARCHAR(100) NOT NULL,
+        entity_type VARCHAR(50) NOT NULL,
+        entity_id VARCHAR(100) NOT NULL,
+        expected_anomaly BOOLEAN NOT NULL,
+        expected_detection VARCHAR(50) NOT NULL,
+        severity VARCHAR(50) NOT NULL,
+        seed INTEGER NOT NULL,
+        anomaly_magnitude DOUBLE PRECISION,
+        detected_incident_id VARCHAR(100),
+        is_true_positive BOOLEAN,
+        is_false_positive BOOLEAN,
+        is_false_negative BOOLEAN,
+        is_true_negative BOOLEAN,
+        miss_reason TEXT,
+        created_at TIMESTAMPTZ NOT NULL,
+        metadata_json TEXT
+    );
+    """)
+
+    # 12. Incident Embeddings Table (for Case Memory cosine similarity)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS incident_embeddings (
+        incident_id VARCHAR(100) PRIMARY KEY REFERENCES incidents(incident_id) ON DELETE CASCADE,
+        embedding_vector TEXT NOT NULL,
+        content_text TEXT,
+        model_name VARCHAR(100) DEFAULT 'deterministic-semantic-vector',
+        created_at TIMESTAMPTZ NOT NULL
+    );
+    """)
+
+    cursor.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS embedding_json TEXT;")
+
     # Indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_payments_merchant ON payments(merchant_id);")
@@ -220,6 +270,8 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_actions_incident ON governed_actions(incident_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_actions_status ON governed_actions(status);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_eval_scenario ON eval_ground_truth(scenario_id);")
+
 
     conn.commit()
     cursor.close()

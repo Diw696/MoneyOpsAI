@@ -1,12 +1,20 @@
 import React from 'react';
 
 export default function OverviewView({ stats, incidents, onSelectIncident, onTriggerDetection, isDetecting }) {
-  const totalExposure = incidents.reduce((sum, inc) => sum + (inc.potential_exposure || 0), 0);
-  const totalFailed = incidents.reduce((sum, inc) => sum + (inc.evidence?.failed_payments_count || inc.affected_payments || 0), 0);
+  const activeIncidents = incidents.filter(inc => inc.status !== 'resolved');
+  const resolvedIncidents = incidents.filter(inc => inc.status === 'resolved');
+  const totalExposure = activeIncidents.reduce((sum, inc) => sum + (inc.potential_exposure || 0), 0);
+  const totalFailed = activeIncidents.reduce((sum, inc) => sum + (inc.evidence?.failed_payments_count || inc.affected_payments || 0), 0);
 
   return (
     <div className="view-container" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      
+
+      {/* Data provenance subtitle — mirrors the Data page notice so this isn't hidden behind a tab click */}
+      <div style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }} title="Real = live Razorpay Test Mode API data. Incident Lab = labeled synthetic scenarios used for anomaly-detection evaluation. Never blended into one number.">
+        <span style={{ opacity: 0.7 }}>ⓘ</span>
+        <span>Metrics below combine live Razorpay Test Mode data and labeled Incident Lab simulation data — see the Data tab for the per-source breakdown.</span>
+      </div>
+
       {/* 1. TOP 4 CORE OPERATIONAL METRICS */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
         
@@ -29,11 +37,11 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Failed Payments
           </div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: incidents.length > 0 ? '#f87171' : 'var(--text)', marginTop: '8px' }}>
-            {incidents.length > 0 ? totalFailed.toLocaleString('en-IN') : 0}
+          <div style={{ fontSize: '28px', fontWeight: '800', color: activeIncidents.length > 0 ? '#f87171' : 'var(--text)', marginTop: '8px' }}>
+            {activeIncidents.length > 0 ? totalFailed.toLocaleString('en-IN') : 0}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {incidents.length > 0 ? 'Anomalous failure volume' : 'Within normal operational baselines'}
+            {activeIncidents.length > 0 ? 'Anomalous failure volume' : 'Within normal operational baselines'}
           </div>
         </div>
 
@@ -42,11 +50,12 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Active Incidents
           </div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: incidents.length > 0 ? '#f87171' : '#10b981', marginTop: '8px' }}>
-            {incidents.length}
+          <div style={{ fontSize: '28px', fontWeight: '800', color: activeIncidents.length > 0 ? '#f87171' : '#10b981', marginTop: '8px' }}>
+            {activeIncidents.length}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {incidents.length > 0 ? 'Discovered by IsolationForest' : 'All systems operating normally'}
+            {activeIncidents.length > 0 ? 'Discovered by IsolationForest' : 'All systems operating normally'}
+            {resolvedIncidents.length > 0 && ` · ${resolvedIncidents.length} resolved (historical)`}
           </div>
         </div>
 
@@ -95,7 +104,7 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
         </div>
 
         {/* Incident List / Clean Empty State */}
-        {incidents.length === 0 ? (
+        {activeIncidents.length === 0 ? (
           <div style={{ 
             padding: '48px 24px', 
             textAlign: 'center', 
@@ -114,7 +123,7 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {incidents.map((inc) => {
+            {activeIncidents.map((inc) => {
               const failureRate = inc.evidence?.failure_rate_pct ?? (inc.failure_rate ? (inc.failure_rate * 100).toFixed(2) : '0.00');
               const peerRate = inc.evidence?.peer_failure_rate_pct ?? (inc.peer_failure_rate ? (inc.peer_failure_rate * 100).toFixed(2) : '0.00');
               const ratio = inc.evidence?.failure_rate_ratio ?? (Number(peerRate) > 0 ? (Number(failureRate) / Number(peerRate)).toFixed(2) : '1.0');
@@ -217,6 +226,45 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
           </div>
         )}
       </div>
+
+      {/* 3. RESOLVED / HISTORICAL INCIDENTS (case-memory precedent, not active) */}
+      {resolvedIncidents.length > 0 && (
+        <div className="card" style={{ padding: '24px' }}>
+          <h2 style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text-muted)', margin: 0 }}>
+            Resolved / Historical Incidents ({resolvedIncidents.length})
+          </h2>
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 16px 0' }}>
+            Closed incidents kept as case-memory precedent for similarity retrieval during live investigations. Not counted as active.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {resolvedIncidents.map((inc) => (
+              <div
+                key={inc.incident_id}
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '12px',
+                  flexWrap: 'wrap'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span className="badge" style={{ fontSize: '10px', fontWeight: '700', color: '#10b981', background: 'rgba(16, 185, 129, 0.1)', padding: '2px 8px', borderRadius: '10px' }}>
+                    RESOLVED
+                  </span>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{inc.incident_id}</span>
+                  <span style={{ fontSize: '13px', color: 'var(--text)' }}>{inc.title}</span>
+                </div>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{inc.source || 'incident_lab'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
     </div>
   );

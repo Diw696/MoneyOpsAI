@@ -83,6 +83,7 @@ export default function DataView({ onRefreshAll }) {
 
   const realOrders = sourceStats?.orders?.razorpay_test || 0;
   const realPayments = sourceStats?.payments?.razorpay_test || 0;
+  const realPaymentsCaptured = sourceStats?.payments_captured?.razorpay_test || 0;
   const realRefunds = sourceStats?.refunds?.razorpay_test || 0;
   const realWebhooks = sourceStats?.webhooks?.razorpay_webhook || 0;
 
@@ -164,7 +165,7 @@ export default function DataView({ onRefreshAll }) {
       }}>
         <span style={{ fontSize: '16px' }}>ℹ️</span>
         <span>
-          <strong>Data Provenance Notice:</strong> Simulation data is used to reproduce high-volume financial incidents that are difficult to generate safely in Razorpay Test Mode. All records maintain immutable source tags.
+          <strong>Data Provenance Notice:</strong> Simulation data is used to reproduce high-volume financial incidents that are difficult to generate safely in Razorpay Test Mode. All records maintain immutable source tags. Real orders below are created via Razorpay's live test-mode Orders API — an Order being created does NOT mean a payment was made; no checkout was completed and no money moved for these. Captured-payment volume stays at this account's real, unpadded state (currently 2, both failed) because completing a Checkout requires either a human paying it manually or scripting past Razorpay's own hCaptcha / behavioral bot-detection, which this project deliberately does not attempt.
         </span>
       </div>
 
@@ -183,10 +184,12 @@ export default function DataView({ onRefreshAll }) {
             <div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>ORDERS</div>
               <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>{realOrders}</div>
+              <div style={{ fontSize: '10px', color: '#fbbf24', marginTop: '2px' }}>created, not paid</div>
             </div>
             <div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>PAYMENTS</div>
               <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>{realPayments}</div>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>{realPaymentsCaptured} captured</div>
             </div>
             <div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>REFUNDS</div>

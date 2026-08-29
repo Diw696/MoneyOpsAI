@@ -191,4 +191,53 @@ class RazorpayClient:
             data = self._handle_response(res)
             return RazorpayRefundEntity(**data)
 
+    def fetch_all_orders(self, max_items: int = 500) -> List[RazorpayOrderEntity]:
+        """Fetches up to max_items orders across multiple pages from Razorpay API."""
+        all_orders: List[RazorpayOrderEntity] = []
+        skip = 0
+        batch_size = 100
+        while len(all_orders) < max_items:
+            count = min(batch_size, max_items - len(all_orders))
+            batch = self.fetch_orders(count=count, skip=skip)
+            if not batch:
+                break
+            all_orders.extend(batch)
+            if len(batch) < count:
+                break
+            skip += len(batch)
+        return all_orders
+
+    def fetch_all_payments(self, max_items: int = 500) -> List[RazorpayPaymentEntity]:
+        """Fetches up to max_items payments across multiple pages from Razorpay API."""
+        all_payments: List[RazorpayPaymentEntity] = []
+        skip = 0
+        batch_size = 100
+        while len(all_payments) < max_items:
+            count = min(batch_size, max_items - len(all_payments))
+            batch = self.fetch_payments(count=count, skip=skip)
+            if not batch:
+                break
+            all_payments.extend(batch)
+            if len(batch) < count:
+                break
+            skip += len(batch)
+        return all_payments
+
+    def fetch_all_refunds(self, max_items: int = 500) -> List[RazorpayRefundEntity]:
+        """Fetches up to max_items refunds across multiple pages from Razorpay API."""
+        all_refunds: List[RazorpayRefundEntity] = []
+        skip = 0
+        batch_size = 100
+        while len(all_refunds) < max_items:
+            count = min(batch_size, max_items - len(all_refunds))
+            batch = self.fetch_refunds(count=count, skip=skip)
+            if not batch:
+                break
+            all_refunds.extend(batch)
+            if len(batch) < count:
+                break
+            skip += len(batch)
+        return all_refunds
+
 razorpay_client = RazorpayClient()
+
