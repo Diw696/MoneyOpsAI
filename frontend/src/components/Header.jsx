@@ -155,13 +155,13 @@ export default function Header({ activeTab, onTabChange, health, stats, aiStatus
           </button>
 
           <button
-            onClick={() => onTabChange('evaluation')}
+            onClick={() => onTabChange('copilot')}
             style={{
               padding: '7px 18px',
               borderRadius: '6px',
               border: 'none',
-              background: activeTab === 'evaluation' ? 'var(--primary)' : 'transparent',
-              color: activeTab === 'evaluation' ? '#fff' : 'var(--text-muted)',
+              background: activeTab === 'copilot' ? 'var(--primary)' : 'transparent',
+              color: activeTab === 'copilot' ? '#fff' : 'var(--text-muted)',
               fontSize: '13px',
               fontWeight: '700',
               cursor: 'pointer',
@@ -171,8 +171,8 @@ export default function Header({ activeTab, onTabChange, health, stats, aiStatus
               transition: 'all 0.15s ease'
             }}
           >
-            <span>🎯</span>
-            <span>Evaluation</span>
+            <span>💬</span>
+            <span>Financial Copilot</span>
           </button>
 
           <button

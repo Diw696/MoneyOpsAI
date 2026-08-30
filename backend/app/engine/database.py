@@ -361,6 +361,105 @@ def init_db():
 
     cursor.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS embedding_json TEXT;")
 
+    # =========================================================================
+    # FINANCIAL INTELLIGENCE COPILOT (Phase G) — independent of the MoneyOps
+    # incident-investigation tables above. A separate, self-contained schema
+    # for user-uploaded financial documents/transactions and Gemini-grounded
+    # Q&A over them, deliberately not reusing payments/orders/refunds (those
+    # model Razorpay/Incident Lab payment-lifecycle events, not arbitrary
+    # user-uploaded statement line items with a different shape/provenance).
+    # =========================================================================
+
+    # 13. Financial Accounts Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS financial_accounts (
+        account_id VARCHAR(100) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        institution VARCHAR(255),
+        account_type VARCHAR(50) DEFAULT 'bank',
+        currency VARCHAR(10) DEFAULT 'INR',
+        metadata_json TEXT,
+        created_at TIMESTAMPTZ NOT NULL
+    );
+    """)
+
+    # 14. Financial Documents Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS financial_documents (
+        document_id VARCHAR(100) PRIMARY KEY,
+        filename VARCHAR(255) NOT NULL,
+        document_type VARCHAR(50) NOT NULL,
+        source VARCHAR(50) DEFAULT 'user_upload',
+        account_id VARCHAR(100) REFERENCES financial_accounts(account_id) ON DELETE SET NULL,
+        processing_status VARCHAR(50) DEFAULT 'processing',
+        error_message TEXT,
+        uploaded_at TIMESTAMPTZ NOT NULL,
+        metadata_json TEXT,
+        raw_content BYTEA,
+        content_type VARCHAR(100)
+    );
+    """)
+    # Original uploaded file bytes, so Preview/Download can serve the real
+    # source document rather than only the extracted structured data.
+    cursor.execute("ALTER TABLE financial_documents ADD COLUMN IF NOT EXISTS raw_content BYTEA;")
+    cursor.execute("ALTER TABLE financial_documents ADD COLUMN IF NOT EXISTS content_type VARCHAR(100);")
+
+    # 15. Financial Document Chunks Table (RAG layer — real Gemini embeddings,
+    # stored as JSON since pgvector is not installed on this Postgres instance;
+    # ranked with in-process cosine similarity, same proven pattern already
+    # used by incident_embeddings/case_memory.py).
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS financial_document_chunks (
+        chunk_id VARCHAR(100) PRIMARY KEY,
+        document_id VARCHAR(100) NOT NULL REFERENCES financial_documents(document_id) ON DELETE CASCADE,
+        chunk_index INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        embedding_json TEXT,
+        page_number INTEGER,
+        section VARCHAR(255),
+        metadata_json TEXT
+    );
+    """)
+
+    # 16. Financial Transactions Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS financial_transactions (
+        transaction_id VARCHAR(100) PRIMARY KEY,
+        account_id VARCHAR(100) REFERENCES financial_accounts(account_id) ON DELETE SET NULL,
+        document_id VARCHAR(100) REFERENCES financial_documents(document_id) ON DELETE CASCADE,
+        transaction_date TIMESTAMPTZ NOT NULL,
+        description TEXT,
+        merchant VARCHAR(255),
+        amount DOUBLE PRECISION NOT NULL,
+        transaction_type VARCHAR(20) NOT NULL,
+        category VARCHAR(100),
+        reference VARCHAR(255),
+        balance_after DOUBLE PRECISION,
+        metadata_json TEXT,
+        created_at TIMESTAMPTZ NOT NULL
+    );
+    """)
+
+    # 17. Financial Analysis Runs Table (Copilot auditability — deliberately
+    # separate from audit_logs, whose incident_id column is NOT NULL/FK'd to
+    # incidents; most Copilot queries aren't incident-scoped at all).
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS financial_analysis_runs (
+        run_id VARCHAR(100) PRIMARY KEY,
+        query TEXT NOT NULL,
+        tools_called_json TEXT,
+        retrieved_evidence_json TEXT,
+        model VARCHAR(100),
+        response_json TEXT,
+        created_at TIMESTAMPTZ NOT NULL
+    );
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_fin_txn_account ON financial_transactions(account_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_fin_txn_date ON financial_transactions(transaction_date);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_fin_txn_merchant ON financial_transactions(merchant);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_fin_chunks_document ON financial_document_chunks(document_id);")
+
     # Indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_payments_merchant ON payments(merchant_id);")

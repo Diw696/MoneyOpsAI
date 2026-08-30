@@ -3,7 +3,7 @@ import Header from './components/Header';
 import OverviewView from './components/OverviewView';
 import DataView from './components/DataView';
 import InvestigationView from './components/InvestigationView';
-import EvaluationView from './components/EvaluationView';
+import FinancialCopilotView from './components/FinancialCopilotView';
 import AuditView from './components/AuditView';
 import {
   fetchHealth,
@@ -16,7 +16,7 @@ import {
 } from './api';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'data' | 'investigation' | 'evaluation' | 'audit'
+  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'data' | 'investigation' | 'copilot' | 'audit'
 
   const [health, setHealth] = useState(null);
   const [stats, setStats] = useState(null);
@@ -199,8 +199,8 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'evaluation' && (
-          <EvaluationView />
+        {activeTab === 'copilot' && (
+          <FinancialCopilotView incidents={incidents} onSelectIncident={handleSelectAndInvestigate} />
         )}
 
         {activeTab === 'audit' && (

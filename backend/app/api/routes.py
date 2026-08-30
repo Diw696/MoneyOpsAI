@@ -1,8 +1,9 @@
 import json
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException, Request, Header
+from fastapi import APIRouter, HTTPException, Request, Header, UploadFile, File, Form
 from app.core.config import settings
 from app.engine.database import get_db_connection
 from app.engine.pipeline import CanonicalEvent, IngestionPipeline
@@ -15,6 +16,8 @@ from app.integrations.razorpay.exceptions import RazorpayAuthError
 from app.engine.gemini_agent import gemini_agent
 from app.engine.action_governor import action_governor
 from app.engine.batch_evaluator import batch_evaluator
+from app.engine.document_ingestion import DocumentIngestionPipeline
+from app.engine.financial_copilot_agent import financial_copilot_agent
 
 router = APIRouter()
 
@@ -622,6 +625,250 @@ def get_batch_evaluation():
 def run_batch_evaluation():
     """Triggers a full batch evaluation run across 20 labeled ground-truth scenarios."""
     return batch_evaluator.run_full_evaluation()
+
+
+# =============================================================================
+# FINANCIAL INTELLIGENCE COPILOT (PHASE G)
+# =============================================================================
+
+@router.post("/financial/documents/upload")
+async def upload_financial_document(
+    file: UploadFile = File(...),
+    document_type: Optional[str] = Form(None),
+    account_name: Optional[str] = Form(None)
+):
+    """
+    Uploads a financial document (PDF/CSV/XLSX), runs it through the ingestion
+    pipeline (extract -> normalize transactions -> chunk -> embed -> persist),
+    and returns the resulting document + extraction summary.
+    """
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    account_id = None
+    if account_name:
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("SELECT account_id FROM financial_accounts WHERE name = %s;", (account_name,))
+        row = c.fetchone()
+        if row:
+            account_id = row["account_id"]
+        else:
+            account_id = f"facct_{uuid.uuid4().hex[:10]}"
+            c.execute("""
+                INSERT INTO financial_accounts (account_id, name, institution, account_type, currency, metadata_json, created_at)
+                VALUES (%s, %s, NULL, 'bank', 'INR', %s, %s);
+            """, (account_id, account_name, json.dumps({}), datetime.now(timezone.utc).isoformat()))
+            conn.commit()
+        c.close()
+        conn.close()
+
+    result = DocumentIngestionPipeline.ingest(
+        filename=file.filename,
+        raw_bytes=raw_bytes,
+        document_type=document_type,
+        account_id=account_id
+    )
+    return result
+
+@router.get("/financial/documents")
+def list_financial_documents():
+    """Lists all uploaded financial documents with processing status, chunk count,
+    transaction count, and whether the original file is available for preview/download."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT d.document_id, d.filename, d.document_type, d.source, d.account_id,
+               d.processing_status, d.error_message, d.uploaded_at, d.metadata_json,
+               d.content_type, (d.raw_content IS NOT NULL) as has_raw_content,
+               (SELECT COUNT(*) FROM financial_document_chunks ch WHERE ch.document_id = d.document_id) as chunk_count,
+               (SELECT COUNT(*) FROM financial_transactions t WHERE t.document_id = d.document_id) as transaction_count
+        FROM financial_documents d ORDER BY d.uploaded_at DESC;
+    """)
+    rows = [dict(r) for r in c.fetchall()]
+    c.close()
+    conn.close()
+    for d in rows:
+        if d.get("metadata_json"):
+            try:
+                d["metadata"] = json.loads(d["metadata_json"])
+            except Exception:
+                pass
+    return rows
+
+@router.get("/financial/documents/{document_id}/download")
+def download_financial_document(document_id: str, disposition: str = "attachment"):
+    """
+    Serves the original uploaded file. `disposition=inline` (used by the UI's
+    'View' action) lets a PDF render natively in the browser tab; `attachment`
+    (default, used by 'Download') forces a save dialog. 404 if no original
+    file was persisted for this document (should not happen for documents
+    uploaded after raw-content storage was added).
+    """
+    from fastapi.responses import Response
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT filename, content_type, raw_content FROM financial_documents WHERE document_id = %s;", (document_id,))
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found")
+    row = dict(row)
+    if row["raw_content"] is None:
+        raise HTTPException(status_code=404, detail="Original file was not stored for this document (uploaded before file storage was added).")
+    disp_kind = "inline" if disposition == "inline" else "attachment"
+    return Response(
+        content=bytes(row["raw_content"]),
+        media_type=row["content_type"] or "application/octet-stream",
+        headers={"Content-Disposition": f'{disp_kind}; filename="{row["filename"]}"'}
+    )
+
+@router.get("/financial/documents/{document_id}/preview")
+def preview_financial_document(document_id: str):
+    """
+    Returns a readable preview of what was actually indexed from this document:
+    structured transactions (for CSV/XLSX, or any PDF rows that matched) and/or
+    the extracted text chunks (for policy/statement PDFs). Reflects real
+    ingested content only — never a fabricated summary.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT document_id, filename, document_type, processing_status, error_message FROM financial_documents WHERE document_id = %s;", (document_id,))
+    doc = c.fetchone()
+    if not doc:
+        c.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found")
+    doc = dict(doc)
+
+    c.execute("SELECT transaction_id, transaction_date, description, merchant, amount, transaction_type, category FROM financial_transactions WHERE document_id = %s ORDER BY transaction_date DESC LIMIT 100;", (document_id,))
+    transactions = [dict(r) for r in c.fetchall()]
+
+    c.execute("SELECT chunk_id, chunk_index, content, page_number, section FROM financial_document_chunks WHERE document_id = %s ORDER BY chunk_index ASC LIMIT 20;", (document_id,))
+    chunks = [dict(r) for r in c.fetchall()]
+    c.close()
+    conn.close()
+
+    return {"document": doc, "transactions": transactions, "chunks": chunks}
+
+@router.delete("/financial/documents/{document_id}")
+def delete_financial_document(document_id: str):
+    """
+    Permanently removes a document and, via ON DELETE CASCADE on
+    financial_document_chunks/financial_transactions, all of its indexed
+    chunks/embeddings and extracted transactions — guaranteeing no orphaned
+    RAG data can continue surfacing in retrieval after deletion.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT document_id FROM financial_documents WHERE document_id = %s;", (document_id,))
+    if not c.fetchone():
+        c.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found")
+    c.execute("DELETE FROM financial_documents WHERE document_id = %s;", (document_id,))
+    conn.commit()
+    c.close()
+    conn.close()
+    return {"status": "deleted", "document_id": document_id}
+
+@router.get("/financial/accounts")
+def list_financial_accounts():
+    """Lists all financial accounts derived from uploaded documents."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM financial_accounts ORDER BY created_at DESC;")
+    rows = [dict(r) for r in c.fetchall()]
+    c.close()
+    conn.close()
+    return rows
+
+@router.get("/financial/transactions")
+def list_financial_transactions(limit: int = 100, account_id: Optional[str] = None, merchant: Optional[str] = None):
+    """Retrieves persisted financial transactions from PostgreSQL, optionally filtered."""
+    from app.engine.financial_tools import FinancialTools
+    result = FinancialTools.get_transactions(account_id=account_id, merchant=merchant, limit=limit)
+    return result["transactions"]
+
+@router.get("/financial/summary")
+def get_financial_summary():
+    """Returns connected-data summary counts for the Financial Copilot dashboard cards."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) as cnt FROM financial_documents;")
+    documents = c.fetchone()["cnt"]
+    c.execute("SELECT COUNT(*) as cnt FROM financial_transactions;")
+    transactions = c.fetchone()["cnt"]
+    c.execute("SELECT COUNT(*) as cnt FROM financial_accounts;")
+    accounts = c.fetchone()["cnt"]
+    c.execute("SELECT COALESCE(SUM(amount), 0) as total FROM financial_transactions;")
+    total_volume = float(c.fetchone()["total"])
+    c.execute("SELECT COUNT(*) as cnt FROM financial_documents WHERE processing_status = 'ready';")
+    documents_ready = c.fetchone()["cnt"]
+    c.close()
+    conn.close()
+    return {
+        "documents": documents,
+        "documents_ready": documents_ready,
+        "transactions": transactions,
+        "accounts": accounts,
+        "total_volume_inr": total_volume
+    }
+
+class CopilotAskRequest(BaseModel):
+    query: str
+
+@router.post("/financial/copilot/ask")
+def ask_financial_copilot(req: CopilotAskRequest):
+    """
+    Runs a grounded Gemini investigation over uploaded financial documents/
+    transactions using the restricted financial tool registry. Never executes
+    arbitrary SQL and never fabricates evidence.
+    """
+    result = financial_copilot_agent.ask(req.query)
+    if result.get("status") == "error":
+        err_code = result.get("error_code")
+        if err_code == "AI_NOT_CONFIGURED":
+            raise HTTPException(status_code=400, detail={"error_code": err_code, "message": result.get("message")})
+        elif err_code == "EMPTY_QUERY":
+            raise HTTPException(status_code=400, detail={"error_code": err_code, "message": result.get("message")})
+        else:
+            raise HTTPException(status_code=500, detail=result)
+    return result
+
+@router.get("/financial/copilot/runs")
+def list_copilot_runs(limit: int = 20):
+    """Lists recent Financial Copilot analysis runs (auditability record)."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT run_id, query, model, created_at FROM financial_analysis_runs ORDER BY created_at DESC LIMIT %s;", (limit,))
+    rows = [dict(r) for r in c.fetchall()]
+    c.close()
+    conn.close()
+    return rows
+
+@router.get("/financial/copilot/runs/{run_id}")
+def get_copilot_run(run_id: str):
+    """Retrieves the full detail of one Financial Copilot analysis run, including tools called
+    and retrieved evidence (not the raw system prompt)."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM financial_analysis_runs WHERE run_id = %s;", (run_id,))
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Analysis run '{run_id}' not found")
+    d = dict(row)
+    for field in ("tools_called_json", "retrieved_evidence_json", "response_json"):
+        if d.get(field):
+            try:
+                d[field.replace("_json", "")] = json.loads(d[field])
+            except Exception:
+                pass
+    return d
 
 
 

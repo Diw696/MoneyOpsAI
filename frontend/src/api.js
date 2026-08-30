@@ -220,5 +220,94 @@ export async function runBatchEvaluation() {
   return res.json();
 }
 
+// Financial Intelligence Copilot API Functions
+export async function uploadFinancialDocument(file, documentType, accountName) {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (documentType) formData.append("document_type", documentType);
+  if (accountName) formData.append("account_name", accountName);
+  const res = await fetch(`${API_BASE}/financial/documents/upload`, {
+    method: "POST",
+    body: formData
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Document upload failed");
+  }
+  return res.json();
+}
+
+export async function fetchFinancialDocuments() {
+  const res = await fetch(`${API_BASE}/financial/documents`);
+  if (!res.ok) throw new Error("Failed to fetch financial documents");
+  return res.json();
+}
+
+export async function fetchFinancialSummary() {
+  const res = await fetch(`${API_BASE}/financial/summary`);
+  if (!res.ok) throw new Error("Failed to fetch financial summary");
+  return res.json();
+}
+
+export async function fetchFinancialAccounts() {
+  const res = await fetch(`${API_BASE}/financial/accounts`);
+  if (!res.ok) throw new Error("Failed to fetch financial accounts");
+  return res.json();
+}
+
+export async function fetchFinancialTransactions(limit = 100, merchant = null) {
+  const url = merchant
+    ? `${API_BASE}/financial/transactions?limit=${limit}&merchant=${encodeURIComponent(merchant)}`
+    : `${API_BASE}/financial/transactions?limit=${limit}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch financial transactions");
+  return res.json();
+}
+
+export async function askCopilot(query) {
+  const res = await fetch(`${API_BASE}/financial/copilot/ask`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = typeof err.detail === "object" ? err.detail.message : (err.detail || "Copilot query failed");
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+export async function fetchCopilotRuns(limit = 20) {
+  const res = await fetch(`${API_BASE}/financial/copilot/runs?limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to fetch Copilot run history");
+  return res.json();
+}
+
+export async function fetchCopilotRun(runId) {
+  const res = await fetch(`${API_BASE}/financial/copilot/runs/${runId}`);
+  if (!res.ok) throw new Error("Failed to fetch Copilot run detail");
+  return res.json();
+}
+
+export function financialDocumentDownloadUrl(documentId, disposition = "attachment") {
+  return `${API_BASE}/financial/documents/${documentId}/download?disposition=${disposition}`;
+}
+
+export async function fetchFinancialDocumentPreview(documentId) {
+  const res = await fetch(`${API_BASE}/financial/documents/${documentId}/preview`);
+  if (!res.ok) throw new Error("Failed to fetch document preview");
+  return res.json();
+}
+
+export async function deleteFinancialDocument(documentId) {
+  const res = await fetch(`${API_BASE}/financial/documents/${documentId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to delete document");
+  }
+  return res.json();
+}
+
 
 
