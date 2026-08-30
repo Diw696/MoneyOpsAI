@@ -5,13 +5,14 @@ import DataView from './components/DataView';
 import InvestigationView from './components/InvestigationView';
 import EvaluationView from './components/EvaluationView';
 import AuditView from './components/AuditView';
-import { 
+import {
   fetchHealth,
-  fetchStats, 
-  fetchIncidents, 
-  fetchIncidentDetail, 
-  fetchAIStatus, 
-  triggerAnomalyDetection 
+  fetchStats,
+  fetchSourceStats,
+  fetchIncidents,
+  fetchIncidentDetail,
+  fetchAIStatus,
+  triggerAnomalyDetection
 } from './api';
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
 
   const [health, setHealth] = useState(null);
   const [stats, setStats] = useState(null);
+  const [sourceStats, setSourceStats] = useState(null);
   const [aiStatus, setAiStatus] = useState({ provider: 'gemini', configured: false, model: 'gemini-3.5-flash-lite' });
   const [incidents, setIncidents] = useState([]);
   const [selectedIncident, setSelectedIncident] = useState(null);
@@ -27,15 +29,17 @@ export default function App() {
 
   const loadData = async () => {
     try {
-      const [hData, sData, incList, aiInfo] = await Promise.all([
+      const [hData, sData, srcData, incList, aiInfo] = await Promise.all([
         fetchHealth().catch(() => ({ status: "offline", database: "PostgreSQL", razorpay_configured: false, gemini_configured: false })),
         fetchStats().catch(() => null),
+        fetchSourceStats().catch(() => null),
         fetchIncidents().catch(() => []),
         fetchAIStatus().catch(() => ({ provider: 'gemini', configured: false, model: 'gemini-3.5-flash-lite' }))
       ]);
 
       setHealth(hData);
       setStats(sData);
+      setSourceStats(srcData);
       setIncidents(incList || []);
       setAiStatus(aiInfo || { provider: 'gemini', configured: false, model: 'gemini-3.5-flash-lite' });
 
@@ -132,12 +136,13 @@ export default function App() {
       {/* 3. PRIMARY WORKSPACE CONTAINER */}
       <main style={{ maxWidth: "1600px", margin: "0 auto", padding: "24px" }}>
         {activeTab === 'overview' && (
-          <OverviewView 
-            stats={stats} 
-            incidents={incidents} 
-            onSelectIncident={handleSelectAndInvestigate} 
-            onTriggerDetection={handleTriggerDetection} 
-            isDetecting={isDetecting} 
+          <OverviewView
+            stats={stats}
+            sourceStats={sourceStats}
+            incidents={incidents}
+            onSelectIncident={handleSelectAndInvestigate}
+            onTriggerDetection={handleTriggerDetection}
+            isDetecting={isDetecting}
           />
         )}
 

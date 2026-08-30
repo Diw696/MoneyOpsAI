@@ -1,10 +1,11 @@
 import React from 'react';
 
-export default function OverviewView({ stats, incidents, onSelectIncident, onTriggerDetection, isDetecting }) {
+export default function OverviewView({ stats, sourceStats, incidents, onSelectIncident, onTriggerDetection, isDetecting }) {
   const activeIncidents = incidents.filter(inc => inc.status !== 'resolved');
   const resolvedIncidents = incidents.filter(inc => inc.status === 'resolved');
   const totalExposure = activeIncidents.reduce((sum, inc) => sum + (inc.potential_exposure || 0), 0);
   const totalFailed = activeIncidents.reduce((sum, inc) => sum + (inc.evidence?.failed_payments_count || inc.affected_payments || 0), 0);
+  const detectionVolume = sourceStats?.detection_volume || null;
 
   return (
     <div className="view-container" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -14,6 +15,13 @@ export default function OverviewView({ stats, incidents, onSelectIncident, onTri
         <span style={{ opacity: 0.7 }}>ⓘ</span>
         <span>Metrics below combine live Razorpay Test Mode data and labeled Incident Lab simulation data — see the Data tab for the per-source breakdown.</span>
       </div>
+
+      {detectionVolume && !detectionVolume.razorpay_test_sufficient_for_detection && (
+        <div style={{ fontSize: '12px', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ opacity: 0.8 }}>⚠</span>
+          <span>Razorpay Test Mode: {detectionVolume.razorpay_test_payment_count} payment attempt{detectionVolume.razorpay_test_payment_count === 1 ? '' : 's'} — insufficient volume for reliable anomaly detection (needs {detectionVolume.min_sample_size}+). No incidents are raised from real data below that floor.</span>
+        </div>
+      )}
 
       {/* 1. TOP 4 CORE OPERATIONAL METRICS */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>

@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  fetchSourceStats, 
-  syncRazorpay, 
-  fetchPayments, 
-  fetchOrders, 
-  fetchRefunds, 
-  fetchWebhooks 
+import {
+  fetchSourceStats,
+  syncRazorpay,
+  fetchPayments,
+  fetchOrders,
+  fetchRefunds,
+  fetchWebhooks,
+  generateLabData,
+  fetchIncidentLabRuns
 } from '../api';
 
 export default function DataView({ onRefreshAll }) {
@@ -16,6 +18,9 @@ export default function DataView({ onRefreshAll }) {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
+  const [labRuns, setLabRuns] = useState([]);
+  const [generatingLab, setGeneratingLab] = useState(false);
+  const [labMsg, setLabMsg] = useState(null);
 
   const loadProvenance = async () => {
     try {
@@ -23,6 +28,35 @@ export default function DataView({ onRefreshAll }) {
       setSourceStats(data);
     } catch (e) {
       console.warn("Could not load source distribution:", e);
+    }
+  };
+
+  const loadLabRuns = async () => {
+    try {
+      const runs = await fetchIncidentLabRuns(5);
+      setLabRuns(runs || []);
+    } catch (e) {
+      console.warn("Could not load Incident Lab run history:", e);
+    }
+  };
+
+  const handleGenerateLab = async () => {
+    setGeneratingLab(true);
+    setLabMsg(null);
+    try {
+      const res = await generateLabData();
+      setLabMsg({
+        type: 'success',
+        text: `✓ Generated ${res.anomaly_injected} scenario (seed ${res.seed}${res.target_entity ? `, target ${res.target_entity}` : ''}) — ${res.payments_ingested} payments, ${res.anomalous_events_count} anomalous records.`
+      });
+      await loadLabRuns();
+      await loadProvenance();
+      await loadTableData();
+      if (onRefreshAll) onRefreshAll();
+    } catch (e) {
+      setLabMsg({ type: 'error', text: `Generation failed: ${e.message}` });
+    } finally {
+      setGeneratingLab(false);
     }
   };
 
@@ -46,6 +80,7 @@ export default function DataView({ onRefreshAll }) {
 
   useEffect(() => {
     loadProvenance();
+    loadLabRuns();
   }, []);
 
   useEffect(() => {
@@ -86,6 +121,7 @@ export default function DataView({ onRefreshAll }) {
   const realPaymentsCaptured = sourceStats?.payments_captured?.razorpay_test || 0;
   const realRefunds = sourceStats?.refunds?.razorpay_test || 0;
   const realWebhooks = sourceStats?.webhooks?.razorpay_webhook || 0;
+  const detectionVolume = sourceStats?.detection_volume || null;
 
   const labOrders = sourceStats?.orders?.incident_lab || 0;
   const labPayments = sourceStats?.payments?.incident_lab || 0;
@@ -200,15 +236,31 @@ export default function DataView({ onRefreshAll }) {
               <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>{realWebhooks}</div>
             </div>
           </div>
+
+          {detectionVolume && !detectionVolume.razorpay_test_sufficient_for_detection && (
+            <div style={{ marginTop: '14px', padding: '8px 12px', borderRadius: '6px', background: 'rgba(251, 191, 36, 0.08)', border: '1px solid rgba(251, 191, 36, 0.25)', fontSize: '11.5px', color: '#fbbf24' }}>
+              Razorpay Test Mode: {detectionVolume.razorpay_test_payment_count} payment attempt{detectionVolume.razorpay_test_payment_count === 1 ? '' : 's'} — insufficient volume for reliable anomaly detection (needs {detectionVolume.min_sample_size}+). No incidents are raised from this data below that floor.
+            </div>
+          )}
         </div>
 
         {/* Incident Lab Simulation Box */}
         <div className="card" style={{ padding: '20px 24px', border: '1px solid rgba(168, 85, 247, 0.3)', background: 'rgba(168, 85, 247, 0.02)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
             <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc' }}>
               SIMULATION (INCIDENT LAB)
             </span>
-            <code style={{ fontSize: '11px', color: 'var(--text-muted)' }}>source: incident_lab</code>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <code style={{ fontSize: '11px', color: 'var(--text-muted)' }}>source: incident_lab</code>
+              <button
+                onClick={handleGenerateLab}
+                disabled={generatingLab}
+                title="Generates a fresh, varied scenario (random type, target, and severity) into Incident Lab — additive, does not touch existing data"
+                style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid rgba(168, 85, 247, 0.4)', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', fontSize: '11.5px', fontWeight: '700', cursor: generatingLab ? 'default' : 'pointer' }}
+              >
+                {generatingLab ? '↻ Generating...' : '+ Generate New Simulation'}
+              </button>
+            </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginTop: '10px' }}>
             <div>
@@ -228,6 +280,28 @@ export default function DataView({ onRefreshAll }) {
               <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>{labWebhooks}</div>
             </div>
           </div>
+
+          {labMsg && (
+            <div style={{ marginTop: '12px', padding: '8px 12px', borderRadius: '6px', fontSize: '11.5px', background: labMsg.type === 'success' ? 'rgba(52, 211, 153, 0.08)' : 'rgba(248, 113, 113, 0.08)', border: `1px solid ${labMsg.type === 'success' ? 'rgba(52, 211, 153, 0.25)' : 'rgba(248, 113, 113, 0.25)'}`, color: labMsg.type === 'success' ? '#34d399' : '#f87171' }}>
+              {labMsg.text}
+            </div>
+          )}
+
+          {labRuns.length > 0 && (
+            <div style={{ marginTop: '14px' }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '6px' }}>Recent generation runs (reproducible by seed)</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {labRuns.map((r) => (
+                  <div key={r.run_id} style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ color: '#c084fc' }}>seed={r.seed}</span>
+                    <span>{r.anomaly_type}</span>
+                    {r.target_entity_id && <span>→ {r.target_entity_id}</span>}
+                    <span>({r.anomalous_events_count} anomalous)</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
       </div>

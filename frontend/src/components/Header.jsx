@@ -189,53 +189,21 @@ export default function Header({ activeTab, onTabChange, health, stats, aiStatus
         {/* Right: Live Connection Indicators */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           
-          {/* Razorpay Indicator */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '5px 10px',
-            borderRadius: '6px',
-            background: isRazorpayConfigured ? 'rgba(59, 130, 246, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-            border: `1px solid ${isRazorpayConfigured ? 'rgba(59, 130, 246, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
-            fontSize: '11px',
-            color: isRazorpayConfigured ? '#60a5fa' : '#fbbf24'
-          }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isRazorpayConfigured ? '#3b82f6' : '#f59e0b' }}></span>
-            <span>Razorpay: <strong>{isRazorpayConfigured ? 'Test Mode' : 'Keys Needed'}</strong></span>
+          {/* Live status: dot + plain text, no per-item colored box — three of these
+              side by side previously competed for attention as three separate chips. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isRazorpayConfigured ? '#3b82f6' : '#f59e0b', flexShrink: 0 }}></span>
+            <span>Razorpay: <strong style={{ color: isRazorpayConfigured ? 'var(--text)' : '#fbbf24' }}>{isRazorpayConfigured ? 'Test Mode' : 'Keys Needed'}</strong></span>
           </div>
 
-          {/* PostgreSQL Indicator */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '5px 10px',
-            borderRadius: '6px',
-            background: isPostgresHealthy ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-            border: `1px solid ${isPostgresHealthy ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-            fontSize: '11px',
-            color: isPostgresHealthy ? '#10b981' : '#f87171'
-          }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isPostgresHealthy ? '#10b981' : '#ef4444' }}></span>
-            <span>PostgreSQL: <strong>{stats?.payments ? `${stats.payments} txs` : (isPostgresHealthy ? 'Connected' : 'Offline')}</strong></span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isPostgresHealthy ? '#10b981' : '#ef4444', flexShrink: 0 }}></span>
+            <span>PostgreSQL: <strong style={{ color: 'var(--text)' }}>{stats?.payments ? `${stats.payments} txs` : (isPostgresHealthy ? 'Connected' : 'Offline')}</strong></span>
           </div>
 
-          {/* Gemini Indicator */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '5px 12px',
-            borderRadius: '20px',
-            background: isGeminiConfigured ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-            border: `1px solid ${isGeminiConfigured ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-            fontSize: '11px',
-            fontWeight: '700',
-            color: isGeminiConfigured ? '#10b981' : '#f87171'
-          }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isGeminiConfigured ? '#10b981' : '#f87171' }}></span>
-            <span>Gemini: {isGeminiConfigured ? `${geminiModel}` : 'Offline'}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isGeminiConfigured ? '#10b981' : '#f87171', flexShrink: 0 }}></span>
+            <span>Gemini: <strong style={{ color: 'var(--text)' }}>{isGeminiConfigured ? geminiModel : 'Offline'}</strong></span>
           </div>
 
           {/* Refresh Button */}

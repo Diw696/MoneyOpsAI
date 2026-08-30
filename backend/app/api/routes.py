@@ -110,12 +110,20 @@ def get_source_distribution():
     c.close()
     conn.close()
 
+    from app.engine.anomaly_detector import anomaly_detector
+    real_payment_volume = payments_by_source.get("razorpay_test", 0)
+
     return {
         "payments": payments_by_source,
         "payments_captured": payments_captured_by_source,
         "orders": orders_by_source,
         "refunds": refunds_by_source,
-        "webhooks": webhooks_by_source
+        "webhooks": webhooks_by_source,
+        "detection_volume": {
+            "min_sample_size": anomaly_detector.MIN_SAMPLE_SIZE,
+            "razorpay_test_payment_count": real_payment_volume,
+            "razorpay_test_sufficient_for_detection": real_payment_volume >= anomaly_detector.MIN_SAMPLE_SIZE
+        }
     }
 
 # =============================================================================
@@ -201,10 +209,10 @@ async def ingest_razorpay_webhook(
 # =============================================================================
 
 class GenerateLabRequest(BaseModel):
-    seed: int = 42
-    payments: int = 1000
+    seed: Optional[int] = None
+    payments: int = 250
     merchants: int = 10
-    anomaly: str = "none"  # "none", "gateway_spike", "refund_spike", "duplicate_refund", "webhook_retry"
+    anomaly: str = "auto"  # "auto" (random each run), "none", or one of SCENARIO_TYPES
 
 @router.post("/incident-lab/generate")
 def generate_incident_lab_data(req: GenerateLabRequest):
@@ -213,8 +221,10 @@ def generate_incident_lab_data(req: GenerateLabRequest):
     the shared IngestionPipeline with source='incident_lab'.
     """
     try:
+        import random as _random
+        seed = req.seed if req.seed is not None else _random.randint(1, 999_999)
         summary = IncidentLabGenerator.generate_dataset(
-            seed=req.seed,
+            seed=seed,
             num_payments=req.payments,
             num_merchants=req.merchants,
             anomaly_type=req.anomaly
@@ -222,6 +232,17 @@ def generate_incident_lab_data(req: GenerateLabRequest):
         return summary
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Incident Lab generation failed: {str(e)}")
+
+@router.get("/incident-lab/runs")
+def list_incident_lab_runs(limit: int = 10):
+    """Lists recent Incident Lab generation runs (seed, scenario, target) for reproducibility."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM incident_lab_runs ORDER BY generated_at DESC LIMIT %s;", (limit,))
+    rows = c.fetchall()
+    c.close()
+    conn.close()
+    return [dict(r) for r in rows]
 
 # =============================================================================
 # ML ANOMALY DETECTION (PHASE B)

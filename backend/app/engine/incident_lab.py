@@ -4,6 +4,12 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from app.engine.pipeline import CanonicalEvent, IngestionPipeline
+from app.engine.database import get_db_connection
+
+# The four scenario types this generator can inject, matching the ones the
+# evaluation harness and Gemini investigation agent already reason about
+# elsewhere in this project.
+SCENARIO_TYPES = ["gateway_spike", "refund_spike", "duplicate_refund", "webhook_delivery_failure"]
 
 MERCHANT_PROFILES = [
     {"id": "merch_Nova_Store", "name": "Nova Lifestyle & Fashion", "category": "ecommerce", "refund_rate": 0.018},
@@ -34,7 +40,7 @@ class IncidentLabGenerator:
         seed: int = 42,
         num_payments: int = 1000,
         num_merchants: int = 10,
-        anomaly_type: str = "none",  # "none", "gateway_spike", "refund_spike", "duplicate_refund", "webhook_retry"
+        anomaly_type: str = "auto",  # "auto" (random each run), "none", or one of SCENARIO_TYPES
         days_back: int = 7
     ) -> Dict[str, Any]:
         random.seed(seed)
@@ -43,6 +49,44 @@ class IncidentLabGenerator:
         merchants = MERCHANT_PROFILES[:num_merchants]
         base_time = datetime.utcnow() - timedelta(days=days_back)
         canonical_events: List[CanonicalEvent] = []
+
+        # "auto" resolves into a random scenario type AND a random target, varying
+        # every call — this is what the "Generate New Simulation" UI action uses.
+        # An explicit anomaly_type (e.g. a caller that wants a specific, repeatable
+        # demo scenario) keeps the original fixed targets (Gateway_X / Nova Store)
+        # so existing callers and tests stay deterministic and unsurprised.
+        is_auto = anomaly_type in ("auto", "random")
+        resolved_anomaly_type = random.choice(SCENARIO_TYPES) if is_auto else anomaly_type
+
+        if is_auto:
+            target_gateway = random.choice(GATEWAYS) if resolved_anomaly_type == "gateway_spike" else None
+            target_merchant = random.choice(merchants) if resolved_anomaly_type in ("refund_spike", "duplicate_refund", "webhook_delivery_failure") else None
+            target_merchant_id = target_merchant["id"] if target_merchant else None
+        else:
+            target_gateway = "Gateway_X" if resolved_anomaly_type == "gateway_spike" else None
+            target_merchant_id = "merch_Nova_Store" if resolved_anomaly_type in ("refund_spike", "duplicate_refund", "webhook_delivery_failure") else None
+
+        # Same reasoning for severity: only vary it in "auto" mode. An explicit call
+        # keeps the original fixed magnitudes so existing callers/tests that assert a
+        # minimum injected failure rate stay reliably above their threshold.
+        if is_auto:
+            anomaly_start_frac = round(random.uniform(0.45, 0.70), 2)
+            gateway_fail_rate = round(random.uniform(0.30, 0.55), 2)
+            refund_spike_rate = round(random.uniform(0.10, 0.20), 3)
+            webhook_fail_rate = round(random.uniform(0.25, 0.50), 2)
+        else:
+            anomaly_start_frac = 0.6
+            gateway_fail_rate = 0.45
+            refund_spike_rate = 0.14
+            webhook_fail_rate = 0.40
+
+        severity_magnitude = {
+            "gateway_spike": gateway_fail_rate,
+            "refund_spike": refund_spike_rate,
+            "duplicate_refund": None,
+            "webhook_delivery_failure": webhook_fail_rate,
+            "none": None
+        }.get(resolved_anomaly_type)
 
         # 1. Generate Merchants as CanonicalEvents
         for m in merchants:
@@ -89,9 +133,10 @@ class IncidentLabGenerator:
             fail_code = None
             is_anomalous = False
 
-            if anomaly_type == "gateway_spike" and gateway == "Gateway_X" and i > (num_payments * 0.6):
-                # Inject 45% failure rate on Gateway_X in second half
-                if random.random() < 0.45:
+            if resolved_anomaly_type == "gateway_spike" and gateway == target_gateway and i > (num_payments * anomaly_start_frac):
+                # Inject an elevated failure rate on the chosen target gateway
+                # for the back portion of the run (this scenario's "incident window").
+                if random.random() < gateway_fail_rate:
                     is_success = False
                     fail_code = "GATEWAY_TIMEOUT"
                     is_anomalous = True
@@ -100,9 +145,6 @@ class IncidentLabGenerator:
                 if random.random() < 0.04:
                     is_success = False
                     fail_code = random.choice(FAILURE_CODES)
-
-            if is_anomalous:
-                anomalous_records_count += 1
 
             # A. Order Event
             order_status = "paid" if is_success else "attempted"
@@ -146,6 +188,12 @@ class IncidentLabGenerator:
 
             # C. Webhook Event for Payment
             wh_id = f"wh_lab_pay_{i:06d}"
+            wh_status = "delivered"
+            if resolved_anomaly_type == "webhook_delivery_failure" and merch["id"] == target_merchant_id and i > (num_payments * anomaly_start_frac):
+                if random.random() < webhook_fail_rate:
+                    wh_status = "failed"
+                    is_anomalous = True
+
             canonical_events.append(CanonicalEvent(
                 canonical_id=wh_id,
                 source="incident_lab",
@@ -154,11 +202,11 @@ class IncidentLabGenerator:
                 entity_id=payment_id,
                 merchant_id=merch["id"],
                 amount=0.0,
-                status="delivered",
+                status=wh_status,
                 timestamp=time_str,
                 payload={
                     "external_event_id": f"x_evt_lab_pay_{i:06d}",
-                    "signature_valid": True,
+                    "signature_valid": wh_status != "failed",
                     "payment_id": payment_id
                 }
             ))
@@ -167,14 +215,23 @@ class IncidentLabGenerator:
             # D. Refund Generation
             if is_success:
                 refund_prob = merch["refund_rate"]
-                if anomaly_type == "refund_spike" and merch["id"] == "merch_Nova_Store" and i > (num_payments * 0.5):
-                    # Inject 14% refund rate for Nova Store
-                    refund_prob = 0.14
+                in_target_window = merch["id"] == target_merchant_id and i > (num_payments * anomaly_start_frac)
+
+                if resolved_anomaly_type == "refund_spike" and in_target_window:
+                    # Inject an elevated refund rate for the chosen target merchant
+                    refund_prob = refund_spike_rate
                     is_anomalous = True
+                elif resolved_anomaly_type == "duplicate_refund" and in_target_window:
+                    # A merchant's baseline refund rate (often <2%) is too low for a
+                    # duplicate-refund race condition to actually show up within a
+                    # few hundred payments, so raise the odds a refund happens at all
+                    # for the target merchant during the incident window — the
+                    # duplication itself still only hits every 7th of those.
+                    refund_prob = max(refund_prob, 0.25)
 
                 if random.random() < refund_prob:
                     refund_count = 1
-                    if anomaly_type == "duplicate_refund" and i % 7 == 0:
+                    if resolved_anomaly_type == "duplicate_refund" and in_target_window and i % 7 == 0:
                         # Inject duplicate refund race condition (2 instant refunds on same payment)
                         refund_count = 2
                         is_anomalous = True
@@ -202,13 +259,57 @@ class IncidentLabGenerator:
                         ))
                         generated_refunds += 1
 
-        # 3. Ingest Everything through the Unified IngestionPipeline
+            # Count this iteration once, after payment/webhook/refund injection have
+            # all had a chance to mark it anomalous (a refund-spike or duplicate-refund
+            # record would otherwise be missed since those are decided after the
+            # original mid-loop count point).
+            if is_anomalous:
+                anomalous_records_count += 1
+
+        # 3. Replace the previous Incident Lab dataset with this run's, scoped strictly
+        # to source='incident_lab' — this can never touch real razorpay_test rows.
+        # Without this, a new run with a different scenario/target/refund-count would
+        # only overwrite the payment/order IDs it reuses and leave stale rows behind
+        # from whatever the previous run generated (e.g. orphaned refunds), producing
+        # an internally incoherent mix of two unrelated scenarios' data.
+        purge_conn = get_db_connection()
+        purge_cur = purge_conn.cursor()
+        for table in ("refunds", "webhook_events", "payments", "orders"):
+            purge_cur.execute(f"DELETE FROM {table} WHERE source = 'incident_lab';")
+        purge_conn.commit()
+        purge_cur.close()
+        purge_conn.close()
+
+        # 4. Ingest Everything through the Unified IngestionPipeline
         ingest_stats = IngestionPipeline.ingest_batch(canonical_events)
+
+        # 4. Record this run so it can be identified and regenerated by its seed.
+        run_id = f"lab_run_{uuid.uuid4().hex[:10]}"
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO incident_lab_runs (
+                run_id, seed, anomaly_type, target_entity_type, target_entity_id,
+                severity_magnitude, num_payments, anomalous_events_count, generated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
+        """, (
+            run_id, seed, resolved_anomaly_type,
+            "gateway" if target_gateway else ("merchant" if target_merchant_id else None),
+            target_gateway or target_merchant_id,
+            severity_magnitude, num_payments, anomalous_records_count,
+            datetime.utcnow().isoformat()
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
 
         return {
             "status": "success",
+            "run_id": run_id,
             "seed": seed,
-            "anomaly_injected": anomaly_type,
+            "anomaly_requested": anomaly_type,
+            "anomaly_injected": resolved_anomaly_type,
+            "target_entity": target_gateway or target_merchant_id,
             "anomalous_events_count": anomalous_records_count,
             "merchants_configured": num_merchants,
             "total_canonical_events": len(canonical_events),

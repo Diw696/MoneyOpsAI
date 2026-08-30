@@ -20,18 +20,27 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
   const [expandedStep, setExpandedStep] = useState(null);
   const [showMerchants, setShowMerchants] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [staleInvestigationNotice, setStaleInvestigationNotice] = useState(null);
 
   // Action Governor State
   const [actions, setActions] = useState([]);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionMsg, setActionMsg] = useState(null);
 
+  // Depend on incident_id specifically, not the incident object — App.jsx's 5s
+  // polling refresh creates a new object reference for the SAME incident on every
+  // tick, and this effect must only reset/reload state on an actual navigation to
+  // a different incident, not on every background refresh of the one being viewed.
   useEffect(() => {
     if (incident?.incident_id) {
+      setExpandedStep(null);
+      setShowMerchants(false);
+      setErrorMsg(null);
+      setActionMsg(null);
       loadInvestigationAndActions(incident.incident_id);
       loadSimilarCases(incident.incident_id);
     }
-  }, [incident]);
+  }, [incident?.incident_id]);
 
   const loadSimilarCases = async (incId) => {
     try {
@@ -47,20 +56,46 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
 
 
   const loadInvestigationAndActions = async (incId) => {
+    // Reset first so switching incidents never shows stale state from the
+    // previously-selected one while the new fetch is in flight.
+    setInvestigationData(null);
+    setSteps([]);
+    setActions([]);
+    setStaleInvestigationNotice(null);
+
     try {
       const [invs, acts] = await Promise.all([
         fetchIncidentInvestigations(incId).catch(() => []),
         fetchIncidentActions(incId).catch(() => [])
       ]);
 
-      if (invs && invs.length > 0) {
-        const latest = invs[0];
-        setInvestigationData(latest);
-        const stps = await fetchInvestigationSteps(latest.investigation_id);
+      const sortedInvs = invs || [];
+      const primaryAct = acts && acts.length > 0 ? acts[0] : null;
+
+      // The most recent investigation ATTEMPT (sortedInvs[0]) is not necessarily the
+      // one a proposed/approved/executed action is actually based on — a later
+      // re-investigation can fail (e.g. a Gemini timeout) without invalidating an
+      // earlier successful one an action already relies on. Show the investigation
+      // the action is grounded in, and surface the later failure as a visible notice
+      // instead of letting it silently look like the action has no basis at all.
+      let toDisplay = sortedInvs.length > 0 ? sortedInvs[0] : null;
+
+      if (primaryAct?.investigation_id) {
+        const backing = sortedInvs.find(i => i.investigation_id === primaryAct.investigation_id);
+        if (backing && backing.investigation_id !== toDisplay?.investigation_id) {
+          if (toDisplay && toDisplay.status !== 'completed') {
+            setStaleInvestigationNotice(
+              `A more recent re-investigation attempt (${toDisplay.investigation_id}) ${toDisplay.status === 'failed' ? 'failed' : `is ${toDisplay.status}`} — showing investigation ${backing.investigation_id}, the one this action is actually based on.`
+            );
+          }
+          toDisplay = backing;
+        }
+      }
+
+      if (toDisplay) {
+        setInvestigationData(toDisplay);
+        const stps = await fetchInvestigationSteps(toDisplay.investigation_id);
         setSteps(stps || []);
-      } else {
-        setInvestigationData(null);
-        setSteps([]);
       }
 
       setActions(acts || []);
@@ -79,6 +114,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
       if (res.status === 'completed') {
         setInvestigationData({
           investigation_id: res.investigation_id,
+          status: 'completed',
           provider: res.provider,
           model: res.model,
           what_happened: res.report?.what_happened || res.report?.summary,
@@ -211,6 +247,22 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
 
   const topSimilarCase = similarCases.length > 0 ? similarCases[0] : null;
 
+  // Visible workflow stage: detected -> investigating -> investigated ->
+  // recommendation available -> awaiting approval -> approved -> executed.
+  // Nothing here implies "resolved" or "nothing found" just because a panel is empty.
+  const workflowStage = (() => {
+    if (investigating) return { label: 'Investigating…', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.12)' };
+    if (!investigationData) return { label: 'Detected — not yet investigated', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.12)' };
+    if (investigationData.status === 'running') return { label: 'Investigating…', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.12)' };
+    if (investigationData.status === 'failed') return { label: 'Investigation attempt failed', color: '#f87171', bg: 'rgba(248, 113, 113, 0.12)' };
+    if (!primaryAction) return { label: 'Investigated — recommendation available', color: '#34d399', bg: 'rgba(52, 211, 153, 0.12)' };
+    if (primaryAction.status === 'pending_approval') return { label: 'Awaiting human approval', color: '#facc15', bg: 'rgba(250, 204, 21, 0.12)' };
+    if (primaryAction.status === 'approved') return { label: 'Approved — ready to execute', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.12)' };
+    if (primaryAction.status === 'executed') return { label: 'Executed (safe simulation)', color: '#34d399', bg: 'rgba(52, 211, 153, 0.12)' };
+    if (primaryAction.status === 'rejected') return { label: 'Action rejected by operator', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.12)' };
+    return { label: 'Investigated', color: '#34d399', bg: 'rgba(52, 211, 153, 0.12)' };
+  })();
+
   return (
     <div className="view-container" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       
@@ -230,8 +282,11 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
                 Target: <strong style={{ color: 'var(--text)' }}>{incident.target_entity_id || 'Gateway_X'}</strong>
               </span>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>•</span>
-              <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', fontWeight: '700' }}>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                 source: {incident.source || 'incident_lab'}
+              </span>
+              <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', background: workflowStage.bg, color: workflowStage.color, fontWeight: '700' }}>
+                {workflowStage.label}
               </span>
             </div>
             <h1 style={{ fontSize: '22px', fontWeight: '800', color: 'var(--text)', margin: '0 0 6px 0' }}>
@@ -264,6 +319,12 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
         {errorMsg && (
           <div style={{ marginTop: '16px', padding: '12px 16px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', color: '#f87171', fontSize: '13px' }}>
             <strong>Investigation Notice:</strong> {errorMsg}
+          </div>
+        )}
+
+        {staleInvestigationNotice && (
+          <div style={{ marginTop: '16px', padding: '12px 16px', background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.3)', borderRadius: '6px', color: '#fbbf24', fontSize: '13px' }}>
+            <strong>Note:</strong> {staleInvestigationNotice}
           </div>
         )}
       </div>
@@ -353,7 +414,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
       </div>
 
       {/* 4. CASE MEMORY (HISTORICAL SIMULATION PRECEDENTS) */}
-      <div className="card" style={{ padding: '20px 24px', border: '1px solid rgba(99, 102, 241, 0.3)', background: 'rgba(99, 102, 241, 0.02)' }}>
+      <div className="card" style={{ padding: '20px 24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(99, 102, 241, 0.15)', color: 'var(--primary)' }}>
@@ -455,7 +516,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
         
         {/* Evidence Confidence Card */}
-        <div className="card" style={{ padding: '22px 24px', border: '1px solid rgba(59, 130, 246, 0.3)', background: 'rgba(59, 130, 246, 0.02)' }}>
+        <div className="card" style={{ padding: '22px 24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
             <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>
               EVIDENCE CONFIDENCE
@@ -479,7 +540,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
         </div>
 
         {/* AI Recommendation Card */}
-        <div className="card" style={{ padding: '22px 24px', border: '1px solid rgba(16, 185, 129, 0.3)', background: 'rgba(16, 185, 129, 0.02)' }}>
+        <div className="card" style={{ padding: '22px 24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
             <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
               AI-GENERATED RECOMMENDATION
@@ -525,7 +586,7 @@ export default function InvestigationView({ incident, aiStatus, onRefreshAll }) 
             Reroute traffic away from <code style={{ color: '#f87171' }}>{incident.target_entity_id || 'Gateway_X'}</code>
           </div>
           <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '14px' }}>
-            <strong>Policy Reason:</strong> High failure concentration on Gateway_X ({failureRate != null ? `${failureRate}%` : 'no evidence'}) relative to peer baseline ({peerRate != null ? `${peerRate}%` : 'no evidence'}). Reroutes checkout traffic to healthy peer gateways.
+            <strong>Policy Reason:</strong> High failure concentration on {incident.target_entity_id || 'this gateway'} ({failureRate != null ? `${failureRate}%` : 'no evidence'}) relative to peer baseline ({peerRate != null ? `${peerRate}%` : 'no evidence'}). Reroutes checkout traffic to healthy peer gateways.
           </div>
 
           {/* Action Control Buttons */}

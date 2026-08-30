@@ -15,6 +15,13 @@ class AnomalyDetector:
     Zero hardcoded gateway or merchant rules.
     """
 
+    # Below this many payment attempts, a failure-rate percentage is not a reliable
+    # signal: with e.g. 2 attempts, one failure already reads as 50-100%, which looks
+    # identical to a genuine outage but is really just small-sample noise. 20 is the
+    # point where a single additional failure moves the rate by at most ~5 percentage
+    # points, keeping the peer-ratio comparison statistically meaningful.
+    MIN_SAMPLE_SIZE = 20
+
     def __init__(self, contamination: float = 0.05, threshold: float = 0.65, random_state: int = 42):
         self.contamination = contamination
         self.threshold = threshold
@@ -67,33 +74,48 @@ class AnomalyDetector:
                 "gateway_scores": []
             }
 
-        # 1. Build Feature Matrix
-        X = self._prepare_feature_matrix(gateway_features)
+        # 1. Build Feature Matrix — fit and score only over gateways that clear the
+        # sample-size floor. A tiny-sample gateway isn't just unreliable to flag
+        # itself (handled below); left in the fitted population it also acts as an
+        # extreme outlier that skews everyone else's population-relative normalized
+        # score, which would let it suppress a real spike on a legitimate gateway
+        # without ever itself being flagged. Excluding it from fitting, not just
+        # from the final flagging decision, is what actually neutralizes that.
+        scored_features = [g for g in gateway_features if int(g["total_payments"]) >= self.MIN_SAMPLE_SIZE]
+        unscored_features = [g for g in gateway_features if int(g["total_payments"]) < self.MIN_SAMPLE_SIZE]
 
-        # 2. Fit Isolation Forest Model
-        # When population is small (e.g. 5 gateways), IsolationForest is trained with adjusted contamination
-        clf = IsolationForest(
-            n_estimators=100,
-            contamination=self.contamination,
-            random_state=self.random_state
-        )
-        clf.fit(X)
+        normalized_by_entity: Dict[str, float] = {}
+        if scored_features:
+            X = self._prepare_feature_matrix(scored_features)
 
-        # 3. Compute Normalized Anomaly Score
-        # decision_function gives negative values for outliers, positive for inliers
-        raw_scores = clf.decision_function(X)
-        # Normalize: raw_scores typically range in [-0.5, 0.5].
-        # We map more negative -> higher anomaly score [0.0, 1.0]
-        min_s = float(np.min(raw_scores))
-        max_s = float(np.max(raw_scores))
-        
-        normalized_scores = []
-        for s in raw_scores:
-            if max_s > min_s:
-                norm_score = 1.0 - ((float(s) - min_s) / (max_s - min_s))
-            else:
-                norm_score = 0.0
-            normalized_scores.append(round(float(norm_score), 4))
+            # 2. Fit Isolation Forest Model
+            # When population is small (e.g. 5 gateways), IsolationForest is trained with adjusted contamination
+            clf = IsolationForest(
+                n_estimators=100,
+                contamination=self.contamination,
+                random_state=self.random_state
+            )
+            clf.fit(X)
+
+            # 3. Compute Normalized Anomaly Score
+            # decision_function gives negative values for outliers, positive for inliers
+            raw_scores = clf.decision_function(X)
+            # Normalize: raw_scores typically range in [-0.5, 0.5].
+            # We map more negative -> higher anomaly score [0.0, 1.0]
+            min_s = float(np.min(raw_scores))
+            max_s = float(np.max(raw_scores))
+
+            for idx, s in enumerate(raw_scores):
+                if max_s > min_s:
+                    norm_score = 1.0 - ((float(s) - min_s) / (max_s - min_s))
+                else:
+                    norm_score = 0.0
+                normalized_by_entity[str(scored_features[idx]["entity_id"])] = round(float(norm_score), 4)
+
+        # Gateways below the sample-size floor never get a meaningful comparative
+        # score — report 0.0 rather than implying they were fairly evaluated.
+        for g in unscored_features:
+            normalized_by_entity[str(g["entity_id"])] = 0.0
 
         # 4. Evaluate Threshold & Create Incidents
         incidents_created = []
@@ -104,10 +126,13 @@ class AnomalyDetector:
         now_str = datetime.utcnow().isoformat()
 
         for idx, g in enumerate(gateway_features):
-            score = float(normalized_scores[idx])
             gw_name = str(g["entity_id"])
+            score = float(normalized_by_entity[gw_name])
             failure_rate = float(g["failure_rate"])
             ratio = float(g["failure_rate_ratio"])
+
+            total_payments = int(g["total_payments"])
+            sample_size_sufficient = total_payments >= self.MIN_SAMPLE_SIZE
 
             gateway_evaluations.append({
                 "gateway": gw_name,
@@ -115,13 +140,18 @@ class AnomalyDetector:
                 "failure_rate": failure_rate,
                 "peer_failure_rate": float(g["peer_failure_rate"]),
                 "failed_payments": int(g["failed_payments"]),
-                "potential_exposure": float(g["potential_exposure"]),
-                "is_anomalous": bool(score >= self.threshold and failure_rate >= 0.08)
+                "total_payments": total_payments,
+                "source": str(g["source"]),
+                "sample_size_sufficient": sample_size_sufficient,
+                "min_sample_size": self.MIN_SAMPLE_SIZE,
+                "is_anomalous": bool(score >= self.threshold and failure_rate >= 0.08 and sample_size_sufficient),
+                "potential_exposure": float(g["potential_exposure"])
             })
 
             # Check if entity is anomalous
-            # Conditions: score >= threshold AND failure_rate >= 8% (to ensure statistical business materiality)
-            if score >= self.threshold and failure_rate >= 0.08:
+            # Conditions: score >= threshold AND failure_rate >= 8% AND at least MIN_SAMPLE_SIZE
+            # payment attempts (statistical business materiality + sample-size floor)
+            if score >= self.threshold and failure_rate >= 0.08 and sample_size_sufficient:
                 severity = "medium"
                 if g["potential_exposure"] >= 100000.0 or (failure_rate >= 0.15 and g["affected_merchants"] >= 3):
                     severity = "critical"
@@ -165,6 +195,8 @@ class AnomalyDetector:
                     inc_id = existing_inc["incident_id"]
                     cursor.execute("""
                         UPDATE incidents SET
+                            title = %s,
+                            severity = %s,
                             affected_merchants = %s,
                             affected_payments = %s,
                             potential_exposure = %s,
@@ -175,6 +207,7 @@ class AnomalyDetector:
                             detected_at = %s
                         WHERE incident_id = %s;
                     """, (
+                        str(title), str(severity),
                         int(g["affected_merchants"]), int(g["failed_payments"]),
                         float(g["potential_exposure"]), float(score), str(primary_signal),
                         json.dumps(evidence), str(description), now_str, inc_id
