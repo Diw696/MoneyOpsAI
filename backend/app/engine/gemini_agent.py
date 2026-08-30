@@ -19,13 +19,27 @@ STRICT INVESTIGATION RULES:
 1. Base all factual claims exclusively on returned tool results.
 2. Do not invent, hallucinate, or assume financial numbers or failure metrics.
 3. Distinguish direct observations from hypotheses.
+3a. First call get_incident to read target_entity_type. If it is 'gateway', investigate
+    using get_gateway_metrics / get_failed_payments / get_affected_merchants /
+    get_webhook_activity. If it is 'merchant', investigate using get_merchant_metrics /
+    get_merchant_refunds / get_merchant_webhook_activity instead — the gateway-scoped
+    tools will not return meaningful data for a merchant_id. If the evidence gathered
+    is insufficient to support a confident root cause, say so explicitly in `why`
+    rather than inventing an explanation that merely matches the incident's title.
 4. Execute tools iteratively to uncover:
    - WHAT happened (the exact anomaly behavior)
    - WHY it happened (the root failure cause, banking node timeouts, error code concentration)
    - WHO was affected (merchants, orders, failure volume)
    - FINANCIAL exposure (total INR amount at risk)
    - WHAT action an operator should take to mitigate the issue.
-5. You can call find_similar_incidents to query Case Memory for historical precedents if relevant.
+5. You can call find_similar_incidents to query Case Memory for historical precedents if
+   relevant. A historical case is PRECEDENT AND CONTEXT ONLY, never proof of the current
+   incident's root cause. Ground `why` in THIS incident's own tool evidence first. If a
+   matched historical case shares the same entity/type but its recorded root cause does
+   not match what your own tool calls show for the current incident (e.g. history says
+   upstream latency, but current evidence shows authentication-error concentration),
+   say so explicitly — name the historical precedent, name how the current evidence
+   differs, and let the current evidence win.
 6. Never expose private chain-of-thought.
 7. When your investigation is complete, return a SINGLE valid JSON object matching this exact schema:
 
@@ -65,7 +79,7 @@ class GeminiInvestigationAgent:
     Investigates financial incidents against PostgreSQL using strict evidence retrieval.
     """
 
-    def __init__(self, max_turns: int = 8, timeout_sec: float = 90.0):
+    def __init__(self, max_turns: int = 8, timeout_sec: float = 150.0):
         self.max_turns = max_turns
         self.timeout_sec = timeout_sec
 
@@ -126,6 +140,10 @@ class GeminiInvestigationAgent:
                 investigation_id, incident_id, provider, model, status, started_at
             ) VALUES (%s, %s, 'gemini', %s, 'running', %s);
         """, (investigation_id, incident_id, model, started_at))
+        cursor.execute(
+            "UPDATE incidents SET investigation_status = 'investigating' WHERE incident_id = %s;",
+            (incident_id,)
+        )
         conn.commit()
 
         # 3. Setup Gemini Request Context
@@ -355,6 +373,10 @@ class GeminiInvestigationAgent:
                 completed_at,
                 investigation_id
             ))
+            cursor.execute(
+                "UPDATE incidents SET investigation_status = 'investigated' WHERE incident_id = %s;",
+                (incident_id,)
+            )
             conn.commit()
         else:
             inv_status = "failed"
@@ -365,6 +387,10 @@ class GeminiInvestigationAgent:
                     completed_at = %s
                 WHERE investigation_id = %s;
             """, (f"Investigation failed: {error_message or 'Max turns exceeded'}", completed_at, investigation_id))
+            cursor.execute(
+                "UPDATE incidents SET investigation_status = 'investigation_failed' WHERE incident_id = %s;",
+                (incident_id,)
+            )
             conn.commit()
 
         cursor.close()

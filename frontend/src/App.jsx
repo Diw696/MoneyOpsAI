@@ -27,6 +27,20 @@ export default function App() {
   const [isDetecting, setIsDetecting] = useState(false);
   const [notification, setNotification] = useState(null);
 
+  // Picks which incident to show when nothing has been explicitly selected yet.
+  // `ORDER BY detected_at DESC` alone is wrong here: detected_at gets refreshed
+  // every time anomaly detection re-confirms an ALREADY-investigated incident,
+  // so a fully-investigated incident can look "newest" and silently outrank a
+  // genuinely pending one — making the app look like investigation happened
+  // automatically. Pending incidents (not yet investigated) always win; only
+  // fall back to "newest overall" when there is no pending incident to show.
+  const pickDefaultIncident = (incList) => {
+    const active = incList.filter(i => i.status !== 'resolved');
+    const pending = active.filter(i => i.investigation_status !== 'investigated');
+    const pool = pending.length > 0 ? pending : (active.length > 0 ? active : incList);
+    return pool.slice().sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at))[0];
+  };
+
   const loadData = async () => {
     try {
       const [hData, sData, srcData, incList, aiInfo] = await Promise.all([
@@ -43,13 +57,22 @@ export default function App() {
       setIncidents(incList || []);
       setAiStatus(aiInfo || { provider: 'gemini', configured: false, model: 'gemini-3.5-flash-lite' });
 
+      // Functional updater — this callback (and the setInterval that calls loadData)
+      // is created once on mount with an empty-dependency effect below, so a plain
+      // read of `selectedIncident` here would always see its value from that first
+      // render (null) and unconditionally reset the selection back to incList[0]
+      // on every single 5s poll, clobbering any incident the user had navigated to.
+      // The functional form always receives the true current state instead.
       if (incList && incList.length > 0) {
-        if (!selectedIncident || !incList.some(i => i.incident_id === selectedIncident.incident_id)) {
-          setSelectedIncident(incList[0]);
-        } else {
-          const updated = incList.find(i => i.incident_id === selectedIncident.incident_id);
-          if (updated) setSelectedIncident(updated);
-        }
+        setSelectedIncident(prev => {
+          // A real prior selection (the user's own click, or an earlier default
+          // pick) stays sticky across polls as long as it still exists — this is
+          // what "explicit selection" means with no URL-based routing in this app.
+          if (!prev || !incList.some(i => i.incident_id === prev.incident_id)) {
+            return pickDefaultIncident(incList);
+          }
+          return incList.find(i => i.incident_id === prev.incident_id) || prev;
+        });
       } else {
         setSelectedIncident(null);
       }
@@ -99,14 +122,27 @@ export default function App() {
     <div className="app-container" style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
       
       {/* 1. TOP HEADER & 4-VIEW NAVIGATION */}
-      <Header 
-        activeTab={activeTab} 
-        onTabChange={setActiveTab} 
+      {/* Single source of truth: an incident's own `status` field ('open' vs
+          'resolved'/'rejected') is exactly what Overview's Active/Resolved
+          split and the Investigation workspace's Active-Pending/Completed
+          split both use. The nav badge previously ALSO required
+          investigation_status !== 'investigated' to count as "pending" —
+          which meant an active incident that had already been investigated
+          (and was sitting at awaiting-approval/approved) silently vanished
+          from BOTH the pending and done counts shown here, producing a nav
+          total that didn't match the actual number of active incidents
+          anywhere else in the app. Deriving both counts from status alone,
+          with no independent condition, is what guarantees they can never
+          drift apart again. */}
+      <Header
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
         health={health}
-        stats={stats} 
-        aiStatus={aiStatus} 
-        incidentsCount={incidents.filter(i => i.status !== 'resolved').length}
-        onRefresh={loadData} 
+        stats={stats}
+        aiStatus={aiStatus}
+        pendingInvestigationCount={incidents.filter(i => i.status !== 'resolved' && i.status !== 'rejected').length}
+        investigatedCount={incidents.filter(i => i.status === 'resolved' || i.status === 'rejected').length}
+        onRefresh={loadData}
       />
 
       {/* 2. GLOBAL NOTIFICATION BANNER */}
@@ -151,10 +187,12 @@ export default function App() {
         )}
 
         {activeTab === 'investigation' && (
-          <InvestigationView 
-            incident={selectedIncident} 
-            aiStatus={aiStatus} 
-            onRefreshAll={loadData} 
+          <InvestigationView
+            incident={selectedIncident}
+            incidents={incidents}
+            onSelectIncident={handleSelectAndInvestigate}
+            aiStatus={aiStatus}
+            onRefreshAll={loadData}
           />
         )}
 

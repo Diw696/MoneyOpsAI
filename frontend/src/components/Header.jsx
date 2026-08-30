@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function Header({ activeTab, onTabChange, health, stats, aiStatus, incidentsCount, onRefresh }) {
+export default function Header({ activeTab, onTabChange, health, stats, aiStatus, pendingInvestigationCount, investigatedCount, onRefresh }) {
   const isRazorpayConfigured = Boolean(health?.razorpay_configured);
   const isPostgresHealthy = health?.status === 'healthy' || health?.database === 'PostgreSQL';
   const isGeminiConfigured = Boolean(health?.gemini_configured ?? aiStatus?.configured);
@@ -110,6 +110,7 @@ export default function Header({ activeTab, onTabChange, health, stats, aiStatus
 
           <button
             onClick={() => onTabChange('investigation')}
+            title={`${pendingInvestigationCount} active/pending, ${investigatedCount} resolved or rejected (final counts, matching Overview and the Investigation workspace exactly)`}
             style={{
               padding: '7px 18px',
               borderRadius: '6px',
@@ -127,7 +128,7 @@ export default function Header({ activeTab, onTabChange, health, stats, aiStatus
           >
             <span>🔍</span>
             <span>Investigation</span>
-            {incidentsCount > 0 && (
+            {pendingInvestigationCount > 0 && (
               <span style={{
                 padding: '1px 6px',
                 borderRadius: '10px',
@@ -136,7 +137,19 @@ export default function Header({ activeTab, onTabChange, health, stats, aiStatus
                 fontSize: '10px',
                 fontWeight: '800'
               }}>
-                {incidentsCount}
+                {pendingInvestigationCount} pending
+              </span>
+            )}
+            {investigatedCount > 0 && (
+              <span style={{
+                padding: '1px 6px',
+                borderRadius: '10px',
+                background: 'rgba(52, 211, 153, 0.2)',
+                color: '#34d399',
+                fontSize: '10px',
+                fontWeight: '800'
+              }}>
+                {investigatedCount} done
               </span>
             )}
           </button>

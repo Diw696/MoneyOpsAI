@@ -210,7 +210,13 @@ async def ingest_razorpay_webhook(
 
 class GenerateLabRequest(BaseModel):
     seed: Optional[int] = None
-    payments: int = 250
+    # 500, not 250: empirically, at 250 payments/batch a single-scenario injection
+    # rarely carries enough absolute signal to clear the Wilson-bound significance
+    # floor once diluted into the accumulated cross-batch population — gateway
+    # incidents in particular almost never fired at the old default, which is why
+    # every real demo run kept surfacing the same one or two merchant incidents
+    # regardless of which scenario a given batch actually injected.
+    payments: int = 800
     merchants: int = 10
     anomaly: str = "auto"  # "auto" (random each run), "none", or one of SCENARIO_TYPES
 
@@ -259,6 +265,26 @@ def trigger_anomaly_detection():
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Anomaly detection failed: {str(e)}")
+
+@router.get("/anomalies/evaluation")
+def get_gateway_evaluation():
+    """
+    Read-only per-gateway evaluation — sample size, Wilson lower bound, whether it
+    clears both statistical guardrails — with zero database writes. Exists so a
+    gateway that's below the confidence threshold is visible somewhere real
+    (Overview page) instead of only being silently excluded from Active Incidents,
+    and so this doesn't require clicking "Run Anomaly Scan" (which does write).
+    """
+    try:
+        evaluations = anomaly_detector.evaluate_gateways()
+        return {
+            "min_sample_size": anomaly_detector.MIN_SAMPLE_SIZE,
+            "min_failure_rate_pct": anomaly_detector.MIN_FAILURE_RATE * 100,
+            "evaluations": evaluations,
+            "below_confidence_threshold": [g for g in evaluations if g["below_confidence_threshold"]]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gateway evaluation failed: {str(e)}")
 
 # =============================================================================
 # DATA ENTITY QUERY ENDPOINTS (POSTGRESQL)

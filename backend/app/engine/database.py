@@ -1,15 +1,81 @@
+import os
+import re
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from typing import Optional
 from app.core.config import settings
 
+# Guards against exactly the mistake made twice in this project's development
+# history: an ad-hoc debug script (run directly with `python -c` or similar,
+# outside pytest — so tests/conftest.py's database-name redirect never fires)
+# containing a blanket DELETE/TRUNCATE/DROP against the real dev database,
+# wiping incident/investigation/audit history. This is a runtime guard, not
+# just a comment: it inspects every statement executed against a non-`_test`
+# database and refuses the destructive ones outright unless explicitly
+# overridden. It only covers the core demo tables — eval_ground_truth's own
+# idempotent re-seed (from fixed source-code scenario constants, never
+# randomized) and other legitimate scoped operations are unaffected.
+_GUARDED_TABLES = (
+    "merchants", "orders", "payments", "refunds", "webhook_events",
+    "incidents", "ai_investigations", "ai_investigation_steps",
+    "governed_actions", "audit_logs", "incident_lab_runs", "incident_embeddings"
+)
+_DESTRUCTIVE_PATTERN = re.compile(
+    r"\b(DELETE\s+FROM|TRUNCATE(\s+TABLE)?|DROP\s+TABLE)\b",
+    re.IGNORECASE
+)
+
+
+class _GuardedCursor:
+    """Wraps a real cursor; blocks unscoped destructive SQL against guarded
+    tables on a non-test database unless MONEYOPS_ALLOW_DESTRUCTIVE_SQL=1."""
+
+    def __init__(self, real_cursor, db_name: str):
+        self._cursor = real_cursor
+        self._db_name = db_name
+
+    def execute(self, query, params=None):
+        if not self._db_name.endswith("_test") and os.environ.get("MONEYOPS_ALLOW_DESTRUCTIVE_SQL") != "1":
+            if _DESTRUCTIVE_PATTERN.search(query) and any(t in query.lower() for t in _GUARDED_TABLES):
+                raise RuntimeError(
+                    f"SAFETY GUARD: refusing to run a destructive statement against "
+                    f"database '{self._db_name}' (not a '_test' database): {query.strip()[:200]!r}. "
+                    f"If this is genuinely intended (e.g. a deliberately gated CLI --force-clean "
+                    f"flow), set MONEYOPS_ALLOW_DESTRUCTIVE_SQL=1 for that process explicitly — "
+                    f"never as a standing default. For exploratory/debug scripts, connect to the "
+                    f"isolated '_test' database instead (see tests/conftest.py)."
+                )
+        return self._cursor.execute(query, params) if params is not None else self._cursor.execute(query)
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+    def __iter__(self):
+        return iter(self._cursor)
+
+
+class _GuardedConnection:
+    """Wraps a real psycopg2 connection so every cursor() it hands out is guarded."""
+
+    def __init__(self, real_conn, db_name: str):
+        self._conn = real_conn
+        self._db_name = db_name
+
+    def cursor(self, *args, **kwargs):
+        return _GuardedCursor(self._conn.cursor(*args, **kwargs), self._db_name)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
 def get_db_connection():
-    """Returns a connection to the PostgreSQL database with RealDictCursor."""
+    """Returns a guarded connection to the PostgreSQL database with RealDictCursor."""
     conn = psycopg2.connect(
         settings.DATABASE_URL,
         cursor_factory=RealDictCursor
     )
-    return conn
+    db_name = settings.DATABASE_URL.rstrip("/").split("/")[-1].split("?")[0]
+    return _GuardedConnection(conn, db_name)
 
 def init_db():
     """Initializes the clean V2 9-table relational financial schema in PostgreSQL."""
@@ -124,6 +190,14 @@ def init_db():
     cursor.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS primary_signal TEXT;")
     cursor.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS evidence_json TEXT;")
 
+    # investigation_status is orthogonal to `status` (open/resolved, the incident's
+    # own lifecycle): 'not_investigated' -> 'investigating' -> 'investigated' or
+    # 'investigation_failed'. Keeping it a separate column avoids turning `status`
+    # into a combined lifecycle+investigation enum, which would have forced every
+    # existing `status != 'resolved'` / `status == 'open'` check across the app to
+    # be rewritten and risked a regression for no benefit to this fix.
+    cursor.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS investigation_status VARCHAR(50) DEFAULT 'not_investigated';")
+
     # 7. AI Investigations Table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS ai_investigations (
@@ -143,6 +217,19 @@ def init_db():
         completed_at TIMESTAMPTZ,
         status VARCHAR(50) DEFAULT 'completed'
     );
+    """)
+
+    # Backfill investigation_status for rows that existed before that column did:
+    # an incident with a real completed row in ai_investigations really has been
+    # investigated. Must run after ai_investigations exists, not before.
+    cursor.execute("""
+        UPDATE incidents SET investigation_status = 'investigated'
+        WHERE investigation_status = 'not_investigated'
+          AND EXISTS (
+              SELECT 1 FROM ai_investigations
+              WHERE ai_investigations.incident_id = incidents.incident_id
+                AND ai_investigations.status = 'completed'
+          );
     """)
 
     # 8. AI Investigation Steps Table

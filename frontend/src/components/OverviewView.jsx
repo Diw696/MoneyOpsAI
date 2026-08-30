@@ -1,19 +1,61 @@
 import React from 'react';
 
 export default function OverviewView({ stats, sourceStats, incidents, onSelectIncident, onTriggerDetection, isDetecting }) {
-  const activeIncidents = incidents.filter(inc => inc.status !== 'resolved');
-  const resolvedIncidents = incidents.filter(inc => inc.status === 'resolved');
+  // Pending-investigation incidents surface first — a reviewer scanning this list
+  // should see what still needs attention before what's already been handled,
+  // rather than whatever was most recently re-confirmed by a detection re-run.
+  // Active/Pending = genuinely unresolved work only. 'rejected' is a final
+  // human decision, same as 'resolved' — it must leave this list immediately,
+  // not linger just because no simulation ever executed for it.
+  const activeIncidents = incidents
+    .filter(inc => inc.status !== 'resolved' && inc.status !== 'rejected')
+    .slice()
+    .sort((a, b) => {
+      const aPending = a.investigation_status !== 'investigated' ? 0 : 1;
+      const bPending = b.investigation_status !== 'investigated' ? 0 : 1;
+      if (aPending !== bPending) return aPending - bPending;
+      return new Date(b.detected_at) - new Date(a.detected_at);
+    });
+  const resolvedIncidents = incidents
+    .filter(inc => inc.status === 'resolved' || inc.status === 'rejected')
+    .slice()
+    .sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at));
   const totalExposure = activeIncidents.reduce((sum, inc) => sum + (inc.potential_exposure || 0), 0);
   const totalFailed = activeIncidents.reduce((sum, inc) => sum + (inc.evidence?.failed_payments_count || inc.affected_payments || 0), 0);
   const detectionVolume = sourceStats?.detection_volume || null;
+  const pendingCount = activeIncidents.filter(inc => inc.investigation_status !== 'investigated').length;
+
+  const mostRecentDetectedAt = incidents.length > 0
+    ? incidents.reduce((latest, inc) => new Date(inc.detected_at) > new Date(latest) ? inc.detected_at : latest, incidents[0].detected_at)
+    : null;
+
+  const relativeTime = (isoStr) => {
+    if (!isoStr) return null;
+    const diffMs = Date.now() - new Date(isoStr).getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  };
 
   return (
     <div className="view-container" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
-      {/* Data provenance subtitle — mirrors the Data page notice so this isn't hidden behind a tab click */}
-      <div style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }} title="Real = live Razorpay Test Mode API data. Incident Lab = labeled synthetic scenarios used for anomaly-detection evaluation. Never blended into one number.">
-        <span style={{ opacity: 0.7 }}>ⓘ</span>
-        <span>Metrics below combine live Razorpay Test Mode data and labeled Incident Lab simulation data — see the Data tab for the per-source breakdown.</span>
+      {/* Operational pulse — real, derived-from-data signals only (no fabricated
+          "last batch"/"last scan" timers not actually backed by fetched state). */}
+      <div style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '14px' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title="Real = live Razorpay Test Mode API data. Incident Lab = labeled synthetic scenarios used for anomaly-detection evaluation. Never blended into one number.">
+          <span style={{ opacity: 0.7 }}>ⓘ</span>
+          <span>Combines live Razorpay Test Mode data and Incident Lab simulation data — see the Data tab for the per-source breakdown.</span>
+        </span>
+        {mostRecentDetectedAt && (
+          <span>• Most recent incident detected <strong style={{ color: 'var(--text)' }}>{relativeTime(mostRecentDetectedAt)}</strong></span>
+        )}
+        <span>• <strong style={{ color: activeIncidents.length > 0 ? '#f87171' : 'var(--text)' }}>{activeIncidents.length}</strong> active</span>
+        {pendingCount > 0 && <span>• <strong style={{ color: '#facc15' }}>{pendingCount}</strong> pending investigation</span>}
+        {resolvedIncidents.length > 0 && <span>• <strong style={{ color: '#34d399' }}>{resolvedIncidents.length}</strong> resolved historically</span>}
       </div>
 
       {detectionVolume && !detectionVolume.razorpay_test_sufficient_for_detection && (
@@ -132,10 +174,64 @@ export default function OverviewView({ stats, sourceStats, incidents, onSelectIn
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {activeIncidents.map((inc) => {
-              const failureRate = inc.evidence?.failure_rate_pct ?? (inc.failure_rate ? (inc.failure_rate * 100).toFixed(2) : '0.00');
-              const peerRate = inc.evidence?.peer_failure_rate_pct ?? (inc.peer_failure_rate ? (inc.peer_failure_rate * 100).toFixed(2) : '0.00');
-              const ratio = inc.evidence?.failure_rate_ratio ?? (Number(peerRate) > 0 ? (Number(failureRate) / Number(peerRate)).toFixed(2) : '1.0');
-              const failedCount = inc.evidence?.failed_payments_count ?? inc.affected_payments ?? 0;
+              const ev = inc.evidence || {};
+              const exposureStr = `₹${(inc.potential_exposure || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+
+              // Each anomaly family carries a genuinely different evidence shape
+              // (a duplicate-refund incident has no "failure rate" at all — it
+              // never had one to report, not a rate of 0%). Determine which
+              // shape this incident's evidence actually is and render only the
+              // metrics that are real for it, falling back to an explicit
+              // empty-state rather than a fabricated 0.00% for anything absent.
+              let cardMetrics;
+              if (ev.duplicate_refund_payments != null) {
+                const dup = ev.duplicate_refund_payments;
+                const totalRefunds = ev.total_refunds ?? null;
+                const concentrationPct = totalRefunds ? ((dup / totalRefunds) * 100).toFixed(2) : null;
+                cardMetrics = [
+                  { label: 'DUPLICATE REFUNDS', value: totalRefunds != null ? `${dup} / ${totalRefunds}` : String(dup) },
+                  { label: 'CONCENTRATION', value: concentrationPct != null ? `${concentrationPct}%` : '—', empty: concentrationPct == null },
+                  { label: 'REFUND / EVENT COUNT', value: totalRefunds != null ? totalRefunds : '—', empty: totalRefunds == null },
+                  { label: 'POTENTIAL EXPOSURE', value: exposureStr }
+                ];
+              } else if (ev.failure_rate_pct != null) {
+                cardMetrics = [
+                  { label: 'FAILURE RATE', value: `${ev.failure_rate_pct}%`, sub: `${ev.failure_rate_ratio ?? '1.0'}x baseline` },
+                  { label: 'PEER BASELINE', value: `${ev.peer_failure_rate_pct ?? 0}%` },
+                  { label: 'AFFECTED PAYMENTS', value: ev.failed_payments_count ?? inc.affected_payments ?? '—' },
+                  { label: 'POTENTIAL EXPOSURE', value: exposureStr }
+                ];
+              } else if (ev.actual_refund_rate_pct != null) {
+                cardMetrics = [
+                  { label: 'REFUND RATE', value: `${ev.actual_refund_rate_pct}%`, sub: `${ev.refund_rate_ratio ?? '1.0'}x baseline` },
+                  { label: "MERCHANT'S BASELINE", value: `${ev.baseline_refund_rate_pct ?? 0}%` },
+                  { label: 'REFUNDS / EVENTS', value: ev.total_refunds ?? '—' },
+                  { label: 'POTENTIAL EXPOSURE', value: exposureStr }
+                ];
+              } else if (ev.webhook_failure_rate_pct != null) {
+                cardMetrics = [
+                  { label: 'WEBHOOK FAILURE RATE', value: `${ev.webhook_failure_rate_pct}%` },
+                  { label: 'PEER BASELINE', value: `${ev.peer_failure_rate_pct ?? 0}%` },
+                  { label: 'FAILED DELIVERIES', value: ev.webhook_failed ?? '—' },
+                  { label: 'POTENTIAL EXPOSURE', value: exposureStr }
+                ];
+              } else {
+                // No evidence recorded yet for this incident's anomaly type —
+                // an explicit empty state, never a fabricated zero.
+                cardMetrics = [
+                  { label: 'PRIMARY METRIC', value: '—', empty: true },
+                  { label: 'BASELINE', value: '—', empty: true },
+                  { label: 'AFFECTED PAYMENTS', value: inc.affected_payments ?? '—' },
+                  { label: 'POTENTIAL EXPOSURE', value: exposureStr }
+                ];
+              }
+
+              const invPill = {
+                not_investigated: { label: 'PENDING INVESTIGATION', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.12)' },
+                investigating: { label: 'INVESTIGATING', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.12)' },
+                investigated: { label: 'INVESTIGATED', color: '#34d399', bg: 'rgba(52, 211, 153, 0.12)' },
+                investigation_failed: { label: 'INVESTIGATION FAILED', color: '#f87171', bg: 'rgba(248, 113, 113, 0.12)' }
+              }[inc.investigation_status || 'not_investigated'];
 
               return (
                 <div 
@@ -157,6 +253,9 @@ export default function OverviewView({ stats, sourceStats, incidents, onSelectIn
                         <span className={`badge badge-${inc.severity || 'critical'}`} style={{ fontSize: '11px', fontWeight: '700' }}>
                           {inc.severity?.toUpperCase() || 'CRITICAL'}
                         </span>
+                        <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', background: invPill.bg, color: invPill.color, fontWeight: '700' }}>
+                          {invPill.label}
+                        </span>
                         <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
                           {inc.incident_id}
                         </span>
@@ -170,19 +269,20 @@ export default function OverviewView({ stats, sourceStats, incidents, onSelectIn
                       </h3>
                     </div>
 
-                    <button 
+                    <button
                       className="btn btn-primary"
                       onClick={() => onSelectIncident(inc)}
-                      style={{ 
-                        padding: '10px 20px', 
-                        fontWeight: '700', 
-                        fontSize: '13px', 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: '8px' 
+                      title="Opens the Investigation tab to review this incident. Does not itself run the Gemini investigation — that's a separate, deliberate action on that page."
+                      style={{
+                        padding: '10px 20px',
+                        fontWeight: '700',
+                        fontSize: '13px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
                       }}
                     >
-                      ⚡ Investigate
+                      🔍 Review
                     </button>
                   </div>
 
@@ -196,30 +296,16 @@ export default function OverviewView({ stats, sourceStats, incidents, onSelectIn
                     borderRadius: '6px',
                     border: '1px solid var(--border)'
                   }}>
-                    <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>FAILURE RATE</div>
-                      <div style={{ fontSize: '16px', fontWeight: '700', color: '#f87171' }}>
-                        {failureRate}% <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'normal' }}>({ratio}x baseline)</span>
+                    {cardMetrics.map((m, mi) => (
+                      <div key={mi}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{m.label}</div>
+                        <div style={{ fontSize: '16px', fontWeight: '700', color: m.empty ? 'var(--text-muted)' : (m.label === 'POTENTIAL EXPOSURE' || mi === 0 ? '#f87171' : 'var(--text)') }}>
+                          {m.value}
+                          {m.sub && <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'normal' }}> ({m.sub})</span>}
+                        </div>
+                        {m.empty && <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>No evidence recorded</div>}
                       </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>PEER BASELINE</div>
-                      <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text)' }}>
-                        {peerRate}%
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>AFFECTED PAYMENTS</div>
-                      <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text)' }}>
-                        {failedCount} failures
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>POTENTIAL EXPOSURE</div>
-                      <div style={{ fontSize: '16px', fontWeight: '700', color: '#f87171' }}>
-                        ₹{(inc.potential_exposure || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </div>
-                    </div>
+                    ))}
                   </div>
 
                   {/* Primary Signal */}
@@ -242,34 +328,41 @@ export default function OverviewView({ stats, sourceStats, incidents, onSelectIn
             Resolved / Historical Incidents ({resolvedIncidents.length})
           </h2>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 16px 0' }}>
-            Closed incidents kept as case-memory precedent for similarity retrieval during live investigations. Not counted as active.
+            Previously handled incidents — executed simulations and human-rejected recommendations alike — kept as case-memory precedent for future investigations. Not counted as active.
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {resolvedIncidents.map((inc) => (
-              <div
-                key={inc.incident_id}
-                style={{
-                  padding: '12px 16px',
-                  background: 'rgba(255, 255, 255, 0.02)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '8px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '12px',
-                  flexWrap: 'wrap'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span className="badge" style={{ fontSize: '10px', fontWeight: '700', color: '#10b981', background: 'rgba(16, 185, 129, 0.1)', padding: '2px 8px', borderRadius: '10px' }}>
-                    RESOLVED
-                  </span>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{inc.incident_id}</span>
-                  <span style={{ fontSize: '13px', color: 'var(--text)' }}>{inc.title}</span>
+            {resolvedIncidents.map((inc) => {
+              const isRejected = inc.status === 'rejected';
+              return (
+                <div
+                  key={inc.incident_id}
+                  style={{
+                    padding: '12px 16px',
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '12px',
+                    flexWrap: 'wrap'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span className="badge" style={{
+                      fontSize: '10px', fontWeight: '700', padding: '2px 8px', borderRadius: '10px',
+                      color: isRejected ? '#94a3b8' : '#10b981',
+                      background: isRejected ? 'rgba(148, 163, 184, 0.12)' : 'rgba(16, 185, 129, 0.1)'
+                    }}>
+                      {isRejected ? 'REJECTED BY HUMAN' : 'RESOLVED'}
+                    </span>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{inc.incident_id}</span>
+                    <span style={{ fontSize: '13px', color: 'var(--text)' }}>{inc.title}</span>
+                  </div>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{inc.source || 'incident_lab'}</span>
                 </div>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{inc.source || 'incident_lab'}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

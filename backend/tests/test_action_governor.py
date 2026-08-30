@@ -200,3 +200,102 @@ def test_invalid_action_id_returns_404():
     """Verifies that querying a nonexistent action returns 404."""
     resp = client.get("/api/actions/act_nonexistent_9999")
     assert resp.status_code == 404
+
+def test_reject_action_marks_parent_incident_rejected():
+    """
+    A human rejection is a final decision, same as an executed simulation — the
+    incident must leave 'open' immediately (status='rejected'), distinct from
+    'resolved', so it moves out of Active/Pending in the UI right away instead
+    of lingering just because no simulation ever executed for it.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO incidents (
+            incident_id, title, type, severity, status, description, affected_merchants,
+            potential_exposure, anomaly_score, detected_at, target_entity_type, target_entity_id
+        ) VALUES (
+            'INC-TEST-REJECT', 'Test Incident for Reject State', 'gateway_failure_spike',
+            'medium', 'open', 'Test Description', 1, 5000.0, 0.8, NOW(), 'gateway', 'Gateway_SBI'
+        ) ON CONFLICT (incident_id) DO NOTHING;
+    """)
+    conn.commit()
+    c.close()
+    conn.close()
+
+    res = action_governor.propose_action(
+        incident_id="INC-TEST-REJECT",
+        investigation_id="inv_test_reject",
+        action_type="reroute_gateway_traffic",
+        target_entity="Gateway_SBI",
+        reason="Test reject-marks-incident",
+        actor="Gemini_Agent"
+    )
+    action_id = res["action_id"]
+
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT status FROM incidents WHERE incident_id = 'INC-TEST-REJECT';")
+    assert c.fetchone()["status"] == "open"
+    c.close()
+    conn.close()
+
+    action_governor.reject_action(action_id, actor="Operator", reason="test rejection")
+
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT status FROM incidents WHERE incident_id = 'INC-TEST-REJECT';")
+    assert c.fetchone()["status"] == "rejected"
+    c.close()
+    conn.close()
+
+def test_execute_action_resolves_parent_incident():
+    """
+    A safely executed remediation must close the incident's own open/resolved
+    lifecycle — without this, an incident stays 'open' forever even after being
+    fully handled, so the dashboard can never show a real resolved history and a
+    recurring instance of the same underlying issue can never be raised as a
+    genuinely fresh incident. Uses its own dedicated incident so it doesn't
+    depend on execution ordering against the shared INC-TEST-ACT fixture.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO incidents (
+            incident_id, title, type, severity, status, description, affected_merchants,
+            potential_exposure, anomaly_score, detected_at, target_entity_type, target_entity_id
+        ) VALUES (
+            'INC-TEST-RESOLVE', 'Test Incident for Resolve-on-Execute', 'gateway_failure_spike',
+            'high', 'open', 'Test Description', 2, 10000.0, 0.9, NOW(), 'gateway', 'Gateway_HDFC'
+        ) ON CONFLICT (incident_id) DO NOTHING;
+    """)
+    conn.commit()
+    c.close()
+    conn.close()
+
+    res = action_governor.propose_action(
+        incident_id="INC-TEST-RESOLVE",
+        investigation_id="inv_test_resolve",
+        action_type="reroute_gateway_traffic",
+        target_entity="Gateway_HDFC",
+        reason="Test resolve-on-execute",
+        actor="Gemini_Agent"
+    )
+    action_id = res["action_id"]
+    action_governor.approve_action(action_id, actor="Operator")
+
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT status FROM incidents WHERE incident_id = 'INC-TEST-RESOLVE';")
+    assert c.fetchone()["status"] == "open"
+    c.close()
+    conn.close()
+
+    action_governor.execute_action(action_id, actor="Operator")
+
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT status FROM incidents WHERE incident_id = 'INC-TEST-RESOLVE';")
+    assert c.fetchone()["status"] == "resolved"
+    c.close()
+    conn.close()

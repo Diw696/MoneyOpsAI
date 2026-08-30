@@ -1,31 +1,44 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-  --bg-main: #07090e;
-  --bg-card: #0f141f;
-  --bg-card-hover: #161e2e;
-  --bg-surface: #141b2a;
-  --bg-accent: rgba(59, 130, 246, 0.08);
-  
+  --bg-main: #0a0c10;
+  --bg-card: #12151b;
+  --bg-card-hover: #171b23;
+  --bg-surface: #12151b;
+  --bg-accent: rgba(99, 102, 241, 0.06);
+
   --border-subtle: rgba(255, 255, 255, 0.07);
-  --border-hover: rgba(255, 255, 255, 0.15);
-  --border-accent: rgba(59, 130, 246, 0.3);
-  
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --text-accent: #38bdf8;
-  
-  --color-brand: #3b82f6;
-  --color-brand-glow: rgba(59, 130, 246, 0.25);
+  --border-hover: rgba(255, 255, 255, 0.14);
+  --border-accent: rgba(99, 102, 241, 0.28);
+
+  --text-primary: #e8eaed;
+  --text-secondary: #9aa1ad;
+  --text-muted: #7a828f;
+  --text-accent: #93c5fd;
+
+  --color-brand: #6366f1;
+  --color-brand-glow: rgba(99, 102, 241, 0.2);
   --color-critical: #ef4444;
-  --color-critical-glow: rgba(239, 68, 68, 0.25);
+  --color-critical-glow: rgba(239, 68, 68, 0.18);
   --color-warning: #f59e0b;
-  --color-warning-glow: rgba(245, 158, 11, 0.2);
+  --color-warning-glow: rgba(245, 158, 11, 0.16);
   --color-success: #10b981;
-  --color-success-glow: rgba(16, 185, 129, 0.2);
+  --color-success-glow: rgba(16, 185, 129, 0.16);
   --color-cyan: #06b6d4;
   --color-purple: #a855f7;
+
+  /* Aliases actually referenced throughout component inline styles — these were
+     previously UNDEFINED (every var(--bg)/var(--surface)/var(--border)/
+     var(--primary)/var(--text) in the app silently fell back to inherited body
+     color via invalid-custom-property behavior, which is why the UI had no real
+     design-token control despite looking superficially consistent). Defining
+     them here is the single highest-leverage fix for visual coherence: every
+     card, border, and text color in the app resolves through these tokens. */
+  --bg: var(--bg-main);
+  --surface: var(--bg-card);
+  --border: var(--border-subtle);
+  --primary: var(--color-brand);
+  --text: var(--text-primary);
 
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
@@ -69,6 +82,21 @@ body {
 
 .mono {
   font-family: var(--font-mono);
+}
+
+/* Standard panel — used everywhere via className="card" throughout the app.
+   This was previously an undefined class (zero effect); every "card" onscreen
+   was actually just whatever ad-hoc inline style its call site happened to add
+   on top of nothing, which is a large part of why the UI read as inconsistent.
+   Defining it here gives every panel in the app the same restrained surface,
+   border, and radius by default — inline styles can still override per-card
+   where a real semantic reason exists (e.g. a risk-red border on the governor
+   panel), but the baseline is now shared and deliberate rather than absent. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 /* Glassmorphism Card */

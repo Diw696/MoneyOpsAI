@@ -266,6 +266,149 @@ class InvestigationTools:
         }
 
     @staticmethod
+    def get_merchant_metrics(merchant_id: str) -> Dict[str, Any]:
+        """
+        Calculates a merchant's refund rate against its own historical baseline,
+        webhook delivery reliability, and duplicate-refund activity — the three
+        merchant-level incident signatures, all from real PostgreSQL aggregates.
+        """
+        if not merchant_id:
+            return {"error": "Missing merchant_id parameter"}
+
+        conn = get_db_connection()
+        c = conn.cursor()
+
+        c.execute("SELECT merchant_id, name, category, baseline_refund_rate FROM merchants WHERE merchant_id = %s;", (merchant_id,))
+        merch = c.fetchone()
+        if not merch:
+            c.close()
+            conn.close()
+            return {"error": f"Merchant '{merchant_id}' not found"}
+
+        c.execute("""
+            SELECT COUNT(*) as total_payments,
+                   SUM(CASE WHEN status = 'captured' THEN 1 ELSE 0 END) as captured_payments,
+                   SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_payments
+            FROM payments WHERE merchant_id = %s;
+        """, (merchant_id,))
+        pay_row = c.fetchone()
+
+        c.execute("""
+            SELECT COUNT(*) as total_refunds, COALESCE(SUM(r.amount), 0) as refund_amount
+            FROM refunds r JOIN payments p ON p.payment_id = r.payment_id
+            WHERE p.merchant_id = %s;
+        """, (merchant_id,))
+        refund_row = c.fetchone()
+
+        c.execute("""
+            SELECT payment_id, COUNT(*) as refund_count
+            FROM refunds r JOIN payments p ON p.payment_id = r.payment_id
+            WHERE p.merchant_id = %s
+            GROUP BY payment_id HAVING COUNT(*) > 1;
+        """, (merchant_id,))
+        dup_rows = c.fetchall()
+
+        c.execute("""
+            SELECT COUNT(*) as total_webhooks,
+                   SUM(CASE WHEN w.delivery_status = 'failed' THEN 1 ELSE 0 END) as failed_webhooks
+            FROM webhook_events w JOIN payments p ON p.payment_id = w.entity_id
+            WHERE p.merchant_id = %s;
+        """, (merchant_id,))
+        wh_row = c.fetchone()
+
+        c.close()
+        conn.close()
+
+        total_payments = int(pay_row["total_payments"] or 0)
+        total_refunds = int(refund_row["total_refunds"] or 0)
+        actual_rate = (total_refunds / total_payments) if total_payments > 0 else 0.0
+        baseline = float(merch["baseline_refund_rate"] or 0.015)
+        wh_total = int(wh_row["total_webhooks"] or 0)
+        wh_failed = int(wh_row["failed_webhooks"] or 0)
+
+        return {
+            "merchant_id": merchant_id,
+            "merchant_name": merch["name"],
+            "category": merch["category"],
+            "total_payments": total_payments,
+            "captured_payments": int(pay_row["captured_payments"] or 0),
+            "failed_payments": int(pay_row["failed_payments"] or 0),
+            "total_refunds": total_refunds,
+            "refund_amount_inr": float(refund_row["refund_amount"] or 0.0),
+            "actual_refund_rate_pct": round(actual_rate * 100, 2),
+            "baseline_refund_rate_pct": round(baseline * 100, 2),
+            "refund_rate_ratio": round(actual_rate / baseline, 2) if baseline > 0 else None,
+            "duplicate_refund_payments_count": len(dup_rows),
+            "duplicate_refund_payment_ids": [r["payment_id"] for r in dup_rows],
+            "webhook_total": wh_total,
+            "webhook_failed": wh_failed,
+            "webhook_failure_rate_pct": round((wh_failed / wh_total) * 100, 2) if wh_total > 0 else 0.0
+        }
+
+    @staticmethod
+    def get_merchant_refunds(merchant_id: str, limit: int = 25) -> Dict[str, Any]:
+        """
+        Retrieves representative refund records for a merchant, flagging which
+        payments received more than one refund (duplicate-refund forensic evidence).
+        """
+        if not merchant_id:
+            return {"error": "Missing merchant_id parameter"}
+
+        limit = min(max(1, limit), 100)
+        conn = get_db_connection()
+        c = conn.cursor()
+
+        c.execute("""
+            SELECT r.refund_id, r.payment_id, r.amount, r.status, r.speed, r.created_at,
+                   COUNT(*) OVER (PARTITION BY r.payment_id) as refunds_on_same_payment
+            FROM refunds r JOIN payments p ON p.payment_id = r.payment_id
+            WHERE p.merchant_id = %s
+            ORDER BY r.created_at DESC
+            LIMIT %s;
+        """, (merchant_id, limit))
+        rows = [dict(r) for r in c.fetchall()]
+
+        c.close()
+        conn.close()
+
+        return {
+            "merchant_id": merchant_id,
+            "refunds_returned": len(rows),
+            "sample_records": rows
+        }
+
+    @staticmethod
+    def get_merchant_webhook_activity(merchant_id: str, limit: int = 50) -> Dict[str, Any]:
+        """
+        Retrieves webhook delivery status and event logs for a merchant's payments.
+        """
+        if not merchant_id:
+            return {"error": "Missing merchant_id parameter"}
+
+        limit = min(max(1, limit), 100)
+        conn = get_db_connection()
+        c = conn.cursor()
+
+        c.execute("""
+            SELECT w.event_id, w.external_event_id, w.event_type, w.entity_id,
+                   w.signature_valid, w.delivery_status, w.received_at, w.source
+            FROM webhook_events w JOIN payments p ON w.entity_id = p.payment_id
+            WHERE p.merchant_id = %s
+            ORDER BY w.received_at DESC
+            LIMIT %s;
+        """, (merchant_id, limit))
+        rows = [dict(r) for r in c.fetchall()]
+
+        c.close()
+        conn.close()
+
+        return {
+            "merchant_id": merchant_id,
+            "webhook_events_returned": len(rows),
+            "events": rows
+        }
+
+    @staticmethod
     def find_similar_incidents(incident_type: str = None, incident_id: str = None) -> Dict[str, Any]:
         """
         Searches historical incident precedents in PostgreSQL using Case Memory.
@@ -402,6 +545,56 @@ GEMINI_TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "get_merchant_metrics",
+        "description": "Calculates a merchant's refund rate against its own historical baseline, webhook delivery reliability, and duplicate-refund payment count — use this for merchant_refund_spike, merchant_duplicate_refund, and merchant_webhook_failure incidents.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "merchant_id": {
+                    "type": "STRING",
+                    "description": "The merchant identifier, e.g. 'merch_Nova_Store'."
+                }
+            },
+            "required": ["merchant_id"]
+        }
+    },
+    {
+        "name": "get_merchant_refunds",
+        "description": "Retrieves representative refund records for a merchant, flagging which payments received more than one refund attempt (duplicate-refund forensic evidence).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "merchant_id": {
+                    "type": "STRING",
+                    "description": "The merchant identifier."
+                },
+                "limit": {
+                    "type": "INTEGER",
+                    "description": "Maximum number of refund records to retrieve (default 25)."
+                }
+            },
+            "required": ["merchant_id"]
+        }
+    },
+    {
+        "name": "get_merchant_webhook_activity",
+        "description": "Retrieves webhook delivery status and event logs for a merchant's payments.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "merchant_id": {
+                    "type": "STRING",
+                    "description": "The merchant identifier."
+                },
+                "limit": {
+                    "type": "INTEGER",
+                    "description": "Max events to return."
+                }
+            },
+            "required": ["merchant_id"]
+        }
+    },
+    {
         "name": "find_similar_incidents",
         "description": "Searches Case Memory in PostgreSQL for historically resolved incidents similar to the current incident to identify precedents, past root causes, and proven remediation actions.",
         "parameters": {
@@ -427,6 +620,9 @@ TOOL_REGISTRY = {
     "get_affected_merchants": InvestigationTools.get_affected_merchants,
     "get_payment_context": InvestigationTools.get_payment_context,
     "get_webhook_activity": InvestigationTools.get_webhook_activity,
+    "get_merchant_metrics": InvestigationTools.get_merchant_metrics,
+    "get_merchant_refunds": InvestigationTools.get_merchant_refunds,
+    "get_merchant_webhook_activity": InvestigationTools.get_merchant_webhook_activity,
     "find_similar_incidents": InvestigationTools.find_similar_incidents,
 }
 

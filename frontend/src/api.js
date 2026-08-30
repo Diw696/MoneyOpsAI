@@ -144,7 +144,7 @@ export async function triggerAnomalyDetection() {
   return res.json();
 }
 
-export async function generateLabData(payload = { payments: 250, merchants: 10, anomaly: "auto" }) {
+export async function generateLabData(payload = { payments: 800, merchants: 10, anomaly: "auto" }) {
   const res = await fetch(`${API_BASE}/incident-lab/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

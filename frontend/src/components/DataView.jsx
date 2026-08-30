@@ -7,7 +7,8 @@ import {
   fetchRefunds,
   fetchWebhooks,
   generateLabData,
-  fetchIncidentLabRuns
+  fetchIncidentLabRuns,
+  triggerAnomalyDetection
 } from '../api';
 
 export default function DataView({ onRefreshAll }) {
@@ -45,13 +46,40 @@ export default function DataView({ onRefreshAll }) {
     setLabMsg(null);
     try {
       const res = await generateLabData();
-      setLabMsg({
-        type: 'success',
-        text: `✓ Generated ${res.anomaly_injected} scenario (seed ${res.seed}${res.target_entity ? `, target ${res.target_entity}` : ''}) — ${res.payments_ingested} payments, ${res.anomalous_events_count} anomalous records.`
-      });
+      const ingestLine = `+${res.payments_ingested} payments, +${res.webhooks_ingested} webhooks, +${res.refunds_ingested} refunds ingested (seed ${res.seed}).`;
+
+      // Two-stage message, matching what's actually happening as two separate
+      // steps: ingestion completes first (visible immediately), then the scan
+      // runs against the now-updated dataset and the message is replaced with
+      // its real result — never implying the new records were "already
+      // scanned" before detection actually ran on them.
+      setLabMsg({ type: 'success', text: `${ingestLine} New data available — running anomaly scan…` });
       await loadLabRuns();
       await loadProvenance();
       await loadTableData();
+
+      // A generation batch is not the same thing as an incident — most batches
+      // (per the outcome distribution) inject nothing at all. Running the
+      // (non-AI) anomaly scan against the now-updated dataset is what lets this
+      // button honestly report "produced an incident" instead of guessing from
+      // the injected scenario alone; it does NOT run Gemini and does NOT create
+      // a completed investigation — that stays a separate, human-triggered step.
+      let outcomeLine = '';
+      try {
+        const totalRecords = await fetchSourceStats().then(s =>
+          Object.values(s.payments || {}).reduce((a, b) => a + b, 0)
+        ).catch(() => null);
+        const det = await triggerAnomalyDetection();
+        const newOnes = (det.incidents || []).filter(i => i.incident_id);
+        const recordsPhrase = totalRecords ? ` across ${totalRecords.toLocaleString('en-IN')} records` : '';
+        outcomeLine = newOnes.length > 0
+          ? `⚠ Detection scan complete — ${newOnes.length} anomal${newOnes.length === 1 ? 'y' : 'ies'} detected${recordsPhrase} (${newOnes.map(i => i.incident_id).join(', ')}).`
+          : `✓ Detection scan complete — no significant anomaly found${recordsPhrase}.`;
+      } catch (e) {
+        outcomeLine = 'Detection scan could not run after generation — use "Run Anomaly Scan" on Overview.';
+      }
+
+      setLabMsg({ type: 'success', text: `${ingestLine} ${outcomeLine}` });
       if (onRefreshAll) onRefreshAll();
     } catch (e) {
       setLabMsg({ type: 'error', text: `Generation failed: ${e.message}` });
@@ -201,7 +229,7 @@ export default function DataView({ onRefreshAll }) {
       }}>
         <span style={{ fontSize: '16px' }}>ℹ️</span>
         <span>
-          <strong>Data Provenance Notice:</strong> Simulation data is used to reproduce high-volume financial incidents that are difficult to generate safely in Razorpay Test Mode. All records maintain immutable source tags. Real orders below are created via Razorpay's live test-mode Orders API — an Order being created does NOT mean a payment was made; no checkout was completed and no money moved for these. Captured-payment volume stays at this account's real, unpadded state (currently 2, both failed) because completing a Checkout requires either a human paying it manually or scripting past Razorpay's own hCaptcha / behavioral bot-detection, which this project deliberately does not attempt.
+          <strong>Data Provenance Notice:</strong> Razorpay Test Mode below is real external data — orders are created via Razorpay's live test-mode Orders API (an Order being created does NOT mean a payment was made; no checkout was completed and no money moved). Captured-payment volume stays at this account's real, unpadded state because completing a Checkout requires either a human paying it manually or scripting past Razorpay's own hCaptcha / bot-detection, which this project deliberately does not attempt. Incident Lab below is a synthetic financial event stream generated to reproduce realistic operational conditions that are difficult to safely produce in Razorpay Test Mode — it is not a real Razorpay payment. Both sources persist to the same PostgreSQL database with an immutable, queryable <code>source</code> tag on every row.
         </span>
       </div>
 
@@ -255,10 +283,10 @@ export default function DataView({ onRefreshAll }) {
               <button
                 onClick={handleGenerateLab}
                 disabled={generatingLab}
-                title="Generates a fresh, varied scenario (random type, target, and severity) into Incident Lab — additive, does not touch existing data"
+                title="Ingests a new batch of realistic synthetic financial activity — appended to PostgreSQL, never replacing prior batches. Most batches are normal; some contain a coherent incident."
                 style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid rgba(168, 85, 247, 0.4)', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', fontSize: '11.5px', fontWeight: '700', cursor: generatingLab ? 'default' : 'pointer' }}
               >
-                {generatingLab ? '↻ Generating...' : '+ Generate New Simulation'}
+                {generatingLab ? '↻ Generating...' : '+ Generate New Data'}
               </button>
             </div>
           </div>

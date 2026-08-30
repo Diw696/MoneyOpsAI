@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from app.engine.database import init_db, get_db_connection
 from app.engine.incident_lab import IncidentLabGenerator
@@ -28,6 +29,10 @@ def main():
 
     if args.clean:
         print(" Cleaning existing database records...")
+        # Explicit, scoped, and only for the lifetime of this already double-
+        # confirmed (--clean AND --force-clean) CLI invocation — never set as a
+        # standing default. See database.py's destructive-statement guard.
+        os.environ["MONEYOPS_ALLOW_DESTRUCTIVE_SQL"] = "1"
         conn = get_db_connection()
         c = conn.cursor()
         c.execute("TRUNCATE TABLE audit_logs, ai_investigation_steps, ai_investigations, incidents, webhook_events, refunds, payments, orders, merchants CASCADE;")

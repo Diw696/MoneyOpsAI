@@ -87,6 +87,29 @@ def test_incident_lab_generator_reproducible():
     assert res1["payments_ingested"] == 200
     assert cnt1 == 200
 
+def test_incident_lab_generation_is_additive_not_replacing():
+    """
+    A second 'Generate New Simulation' call must APPEND to the simulated
+    production stream, not purge and redraw the first run's data — this is what
+    makes Incident Lab feel like a continuous event feed instead of a fixed-size
+    world. Distinct seeds must also produce distinct run tokens (and therefore
+    non-colliding IDs).
+    """
+    res1 = IncidentLabGenerator.generate_dataset(seed=101, num_payments=150, num_merchants=5)
+    res2 = IncidentLabGenerator.generate_dataset(seed=202, num_payments=150, num_merchants=5)
+
+    assert res1["run_token"] != res2["run_token"]
+
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) as cnt FROM payments WHERE source = 'incident_lab';")
+    total_payments = c.fetchone()["cnt"]
+    c.close()
+    conn.close()
+
+    # Both batches' payments must both still be present — 300, not 150.
+    assert total_payments == 300
+
 def test_stats_and_source_distribution_endpoints():
     """Verify GET /api/stats and GET /api/stats/sources reflect actual PostgreSQL counts."""
     # 1. Ingest a payment with source='incident_lab'

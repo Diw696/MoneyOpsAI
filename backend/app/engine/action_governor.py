@@ -223,6 +223,14 @@ class ActionGovernor:
             WHERE action_id = %s;
         """, (action_id,))
 
+        # A human rejection is a final decision on this incident, same as an
+        # executed action — it must leave Active/Pending (it's no longer
+        # unresolved work) but stays visible in history with its real outcome,
+        # distinct from a resolved/executed one. incidents.status ('open' /
+        # 'resolved' / 'rejected') is the incident's own lifecycle, separate
+        # from governed_actions.status ('rejected') which tracks the action itself.
+        c.execute("UPDATE incidents SET status = 'rejected' WHERE incident_id = %s;", (action["incident_id"],))
+
         # Append to audit log
         audit_id = f"aud_{uuid.uuid4().hex[:10]}"
         c.execute("""
@@ -324,6 +332,13 @@ class ActionGovernor:
                 execution_result_json = %s
             WHERE action_id = %s;
         """, (now_str, result_json, action_id))
+
+        # A safely executed remediation closes the incident's own open/resolved
+        # lifecycle (distinct from investigation_status) — without this, an
+        # incident stays 'open' forever even after being fully handled, so the
+        # dashboard never shows a resolved history and detection can never
+        # present a *recurring* instance of the same issue as a fresh incident.
+        c.execute("UPDATE incidents SET status = 'resolved' WHERE incident_id = %s;", (action["incident_id"],))
 
         # Append to audit log
         audit_id = f"aud_{uuid.uuid4().hex[:10]}"
