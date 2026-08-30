@@ -327,13 +327,50 @@ class GeminiInvestigationAgent:
                 except Exception:
                     pass
 
+            # Each anomaly family stores a genuinely different evidence shape (see
+            # anomaly_detector.py) — there is no single shared "failure_rate_pct"
+            # across all four scenario types, and even gateway incidents store their
+            # error-code concentration as "top_failure_code_share" (a 0-1 fraction),
+            # not "top_failure_code_share_pct". Pulling the wrong/absent key here
+            # used to silently fall back to fixed made-up numbers (19.08%, 3.52%,
+            # 85.06%, 87 payments) on every non-gateway incident, and even on
+            # gateway ones for the concentration figure. Map each factor from
+            # whichever real field this incident's evidence actually has, and use
+            # 0 (a genuine "no such signal for this family") rather than a
+            # plausible-looking invented number when a field truly doesn't apply.
+            primary_rate_pct = (
+                inc_ev.get("failure_rate_pct")
+                or inc_ev.get("actual_refund_rate_pct")
+                or inc_ev.get("webhook_failure_rate_pct")
+                or 0.0
+            )
+            baseline_rate_pct = (
+                inc_ev.get("peer_failure_rate_pct")
+                or inc_ev.get("baseline_refund_rate_pct")
+                or 0.0
+            )
+            if inc_ev.get("top_failure_code_share") is not None:
+                concentration_pct = float(inc_ev["top_failure_code_share"]) * 100.0
+            elif inc_ev.get("duplicate_refund_payments") is not None and inc_ev.get("total_refunds"):
+                concentration_pct = (float(inc_ev["duplicate_refund_payments"]) / float(inc_ev["total_refunds"])) * 100.0
+            else:
+                concentration_pct = 0.0
+            corroborating_count = (
+                inc_ev.get("failed_payments_count")
+                or inc_ev.get("total_refunds")
+                or inc_ev.get("duplicate_refund_payments")
+                or inc_ev.get("webhook_failed")
+                or inc_row.get("affected_payments")
+                or 0
+            )
+
             conf_calc = calculate_evidence_confidence(
-                anomaly_score=float(inc_row.get("anomaly_score") or 0.95),
-                failure_rate_pct=float(inc_ev.get("failure_rate_pct") or 19.08),
-                peer_failure_rate_pct=float(inc_ev.get("peer_failure_rate_pct") or 3.52),
-                top_failure_code_share_pct=float(inc_ev.get("top_failure_code_share_pct") or 85.06),
-                failed_payments_count=int(inc_ev.get("failed_payments_count") or inc_row.get("affected_payments") or 87),
-                affected_merchants_count=int(inc_row.get("affected_merchants") or 10)
+                anomaly_score=float(inc_row.get("anomaly_score") or 0.0),
+                failure_rate_pct=float(primary_rate_pct),
+                peer_failure_rate_pct=float(baseline_rate_pct),
+                top_failure_code_share_pct=concentration_pct,
+                failed_payments_count=int(corroborating_count),
+                affected_merchants_count=int(inc_row.get("affected_merchants") or 0)
             )
             final_report["evidence_confidence"] = conf_calc
             final_report["confidence"] = conf_calc["score_fraction"]

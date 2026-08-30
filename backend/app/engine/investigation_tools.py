@@ -301,10 +301,10 @@ class InvestigationTools:
         refund_row = c.fetchone()
 
         c.execute("""
-            SELECT payment_id, COUNT(*) as refund_count
+            SELECT r.payment_id, COUNT(*) as refund_count
             FROM refunds r JOIN payments p ON p.payment_id = r.payment_id
             WHERE p.merchant_id = %s
-            GROUP BY payment_id HAVING COUNT(*) > 1;
+            GROUP BY r.payment_id HAVING COUNT(*) > 1;
         """, (merchant_id,))
         dup_rows = c.fetchall()
 

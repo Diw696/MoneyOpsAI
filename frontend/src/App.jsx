@@ -35,7 +35,10 @@ export default function App() {
   // automatically. Pending incidents (not yet investigated) always win; only
   // fall back to "newest overall" when there is no pending incident to show.
   const pickDefaultIncident = (incList) => {
-    const active = incList.filter(i => i.status !== 'resolved');
+    // 'rejected' is a final human decision, same as 'resolved' — must be
+    // excluded here too, or a rejected-without-investigating incident could
+    // be auto-selected as the default incident shown on the Investigation tab.
+    const active = incList.filter(i => i.status !== 'resolved' && i.status !== 'rejected');
     const pending = active.filter(i => i.investigation_status !== 'investigated');
     const pool = pending.length > 0 ? pending : (active.length > 0 ? active : incList);
     return pool.slice().sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at))[0];
