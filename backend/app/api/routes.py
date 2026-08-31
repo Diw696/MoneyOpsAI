@@ -805,7 +805,7 @@ def get_financial_summary():
     accounts = c.fetchone()["cnt"]
     c.execute("SELECT COALESCE(SUM(amount), 0) as total FROM financial_transactions;")
     total_volume = float(c.fetchone()["total"])
-    c.execute("SELECT COUNT(*) as cnt FROM financial_documents WHERE processing_status = 'ready';")
+    c.execute("SELECT COUNT(*) as cnt FROM financial_documents WHERE processing_status IN ('ready', 'partial');")
     documents_ready = c.fetchone()["cnt"]
     c.close()
     conn.close()

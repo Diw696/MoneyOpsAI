@@ -20,19 +20,21 @@ from app.engine.embeddings import generate_embedding, cosine_similarity
 _ALLOWED_METRICS = {"total_spend", "average_transaction", "largest_expense", "transaction_count"}
 
 
-def _date_filter_clause(col: str, start_date: Optional[str], end_date: Optional[str], params: list) -> str:
-    """Casts both sides to a bare date so a date-only filter (e.g. '2026-08-10')
+def _date_filter_clauses(col: str, start_date: Optional[str], end_date: Optional[str], params: list) -> List[str]:
+    """Returns zero or more bare condition fragments (no leading AND) for the
+    caller to append to its own clause list before joining with " AND ".
+    Casts both sides to a bare date so a date-only filter (e.g. '2026-08-10')
     matches the whole calendar day regardless of the TIMESTAMPTZ column's
     stored time-of-day/timezone — a plain '<=' comparison against a date
     string is timezone-sensitive and can silently exclude same-day rows."""
-    clause = ""
+    clauses = []
     if start_date:
-        clause += f" AND {col}::date >= %s::date"
+        clauses.append(f"{col}::date >= %s::date")
         params.append(start_date)
     if end_date:
-        clause += f" AND {col}::date <= %s::date"
+        clauses.append(f"{col}::date <= %s::date")
         params.append(end_date)
-    return clause
+    return clauses
 
 
 class FinancialTools:
@@ -127,7 +129,7 @@ class FinancialTools:
         if max_amount is not None:
             clauses.append("amount <= %s")
             params.append(max_amount)
-        clauses.append(_date_filter_clause("transaction_date", start_date, end_date, params) or "1=1")
+        clauses.extend(_date_filter_clauses("transaction_date", start_date, end_date, params))
 
         query = f"SELECT * FROM financial_transactions WHERE {' AND '.join(clauses)} ORDER BY transaction_date DESC LIMIT %s;"
         params.append(limit)
@@ -192,7 +194,7 @@ class FinancialTools:
         if account_id:
             clauses.append("account_id = %s")
             params.append(account_id)
-        clauses.append(_date_filter_clause("transaction_date", start_date, end_date, params) or "1=1")
+        clauses.extend(_date_filter_clauses("transaction_date", start_date, end_date, params))
 
         query = f"""
             SELECT COALESCE({group_col}, 'uncategorized') as group_key, SUM(amount) as total, COUNT(*) as txn_count
@@ -319,7 +321,7 @@ class FinancialTools:
         if account_id:
             clauses.append("account_id = %s")
             params.append(account_id)
-        clauses.append(_date_filter_clause("transaction_date", start_date, end_date, params) or "1=1")
+        clauses.extend(_date_filter_clauses("transaction_date", start_date, end_date, params))
         where = " AND ".join(clauses)
 
         conn = get_db_connection()

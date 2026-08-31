@@ -26,6 +26,7 @@ const DOC_TYPE_OPTIONS = [
 const STATUS_BADGE = {
   ready: { label: 'READY', color: '#34d399', bg: 'rgba(52, 211, 153, 0.12)' },
   processing: { label: 'PROCESSING', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.12)' },
+  partial: { label: 'READY — SEARCH ONLY', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.12)' },
   failed: { label: 'FAILED', color: '#f87171', bg: 'rgba(248, 113, 113, 0.12)' }
 };
 
@@ -445,8 +446,8 @@ export default function FinancialCopilotView({ incidents, onSelectIncident }) {
                     <span>Uploaded {new Date(d.uploaded_at).toLocaleString()}</span>
                     {!d.has_raw_content && <span style={{ color: '#fbbf24' }}>Original file unavailable (uploaded before file storage)</span>}
                   </div>
-                  {d.processing_status === 'failed' && d.error_message && (
-                    <div style={{ fontSize: '11px', color: '#f87171', marginTop: '4px' }}>{d.error_message}</div>
+                  {(d.processing_status === 'failed' || d.processing_status === 'partial') && d.error_message && (
+                    <div style={{ fontSize: '11px', color: d.processing_status === 'failed' ? '#f87171' : '#fbbf24', marginTop: '4px' }}>{d.error_message}</div>
                   )}
                 </div>
               );

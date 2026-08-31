@@ -121,6 +121,9 @@ def _parse_date(val: Any) -> Optional[datetime]:
         return None
 
 
+_TRANSACTION_BEARING_TYPES = {"bank_statement", "credit_card_statement", "transaction_csv", "refund_report"}
+
+
 def _detect_document_type(filename: str, declared_type: Optional[str]) -> str:
     if declared_type:
         return declared_type
@@ -213,13 +216,114 @@ _PDF_TXN_LINE = re.compile(
     r"(?P<date>\d{1,2}[-/][A-Za-z0-9]{2,9}[-/]\d{2,4})\s+(?P<desc>.+?)\s+(?P<amount>-?[\d,]+\.\d{2})\s*(?P<type>CR|DR)?\s*$"
 )
 
+# --- Multi-line "record card" PDF statement parser -------------------------
+# Many real UPI/wallet statement PDFs (PhonePe, and similarly-styled exports
+# from other apps) don't render one transaction per text line at all — pypdf
+# extracts them as one field per line, stacked in a repeating block:
+#   Aug 31, 2026 / 09:39 pm / DEBIT / ₹20 / Paid to GLOBIQ /
+#   Transaction ID T260... / UTR No. 455... / Paid by / XXXX7187
+# _PDF_TXN_LINE (a single delimited row) can never match this layout, no
+# matter what date/amount format it's tuned for. This parser instead finds
+# each "date-only" line as a transaction anchor, then reads forward until the
+# next anchor, classifying each line in that block by what it looks like
+# (time / type / amount / reference / label / description) rather than by
+# fixed position — so it tolerates the surrounding lines appearing in a
+# different order on a different provider's statement.
+_DATE_ONLY_LINE = re.compile(
+    r"^(?:"
+    r"[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}"          # Aug 31, 2026 / August 31 2026
+    r"|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}"           # 31 Aug 2026
+    r"|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}"             # 31/08/2026, 31-08-2026
+    r"|\d{4}-\d{1,2}-\d{1,2}"                     # 2026-08-31
+    r")$"
+)
+_TIME_ONLY_LINE = re.compile(r"^\d{1,2}:\d{2}\s*(am|pm)?$", re.IGNORECASE)
+_TYPE_ONLY_LINE = re.compile(r"^(DEBIT|CREDIT|DR|CR|WITHDRAWAL|DEPOSIT)$", re.IGNORECASE)
+_AMOUNT_ONLY_LINE = re.compile(r"^(?:₹|Rs\.?|INR)\s?-?[\d,]+(?:\.\d{1,2})?$", re.IGNORECASE)
+_MASKED_ACCOUNT_LINE = re.compile(r"^X{2,}\d{2,8}$", re.IGNORECASE)
+_FIELD_LABEL_LINE = re.compile(
+    r"^(Transaction ID\b.*|UTR No\.?.*|Ref(?:erence)?\.?\s*(?:No\.?|ID)?\b.*|Paid by$|Credited to$|Debited from$)",
+    re.IGNORECASE
+)
+_MERCHANT_PREFIX = re.compile(
+    r"^(Paid to|Payment to|Received from|Payment from|Sent to|Transfer to|Paid by)\s+",
+    re.IGNORECASE
+)
+_REFERENCE_ID = re.compile(r"Transaction ID\s+(\S+)", re.IGNORECASE)
 
-def _transactions_from_pdf_text(pages_text: List[str]) -> List[Dict[str, Any]]:
-    """Best-effort regex extraction of transaction-row-shaped lines from PDF text.
-    Zero matches is a valid, honest outcome — never invents rows for an
-    unrecognized statement layout."""
+
+def _clean_desc(text: str) -> str:
+    merchant = _MERCHANT_PREFIX.sub("", text).strip()
+    return re.sub(r"\s{2,}", " ", merchant)
+
+
+def _transactions_from_pdf_record_blocks(pages_text: List[str]) -> List[Dict[str, Any]]:
+    """Primary PDF transaction parser: groups lines into one block per
+    date-anchor and classifies each line within the block by shape. Requires
+    at minimum a real date and a real amount to accept a block as a
+    transaction — everything else (merchant, reference) is filled only when
+    confidently found, never guessed."""
     out = []
-    for text in pages_text:
+    for page_num, text in enumerate(pages_text, start=1):
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+
+        anchors = [i for i, l in enumerate(lines) if _DATE_ONLY_LINE.match(l)]
+        for idx, start in enumerate(anchors):
+            end = anchors[idx + 1] if idx + 1 < len(anchors) else len(lines)
+            block = lines[start:end]
+
+            tx_date = _parse_date(block[0])
+            if tx_date is None:
+                continue
+
+            amount = None
+            tx_type = None
+            reference = None
+            desc_candidates = []
+
+            for line in block[1:]:
+                if _TIME_ONLY_LINE.match(line):
+                    continue
+                if amount is None and _AMOUNT_ONLY_LINE.match(line):
+                    amount = _parse_amount(line)
+                    continue
+                if tx_type is None and _TYPE_ONLY_LINE.match(line):
+                    tt = line.strip().upper()
+                    tx_type = "credit" if tt in ("CREDIT", "CR", "DEPOSIT") else "debit"
+                    continue
+                ref_match = _REFERENCE_ID.search(line)
+                if ref_match:
+                    reference = ref_match.group(1)
+                    continue
+                if _FIELD_LABEL_LINE.match(line) or _MASKED_ACCOUNT_LINE.match(line):
+                    continue
+                desc_candidates.append(line)
+
+            if amount is None:
+                continue  # no confidently-parsed amount — do not guess one
+
+            description = _clean_desc(desc_candidates[0]) if desc_candidates else None
+            merchant = description
+
+            out.append({
+                "transaction_date": tx_date,
+                "description": description,
+                "merchant": merchant,
+                "amount": abs(amount),
+                "transaction_type": tx_type or "debit",
+                "category": _infer_category(description, merchant),
+                "reference": reference,
+                "balance_after": None,
+                "metadata": {"page_number": page_num}
+            })
+    return out
+
+
+def _transactions_from_pdf_singleline(pages_text: List[str]) -> List[Dict[str, Any]]:
+    """Fallback for PDFs that DO render one full transaction per text line
+    (a single delimited row: date, description, amount together)."""
+    out = []
+    for page_num, text in enumerate(pages_text, start=1):
         for line in text.splitlines():
             m = _PDF_TXN_LINE.match(line.strip())
             if not m:
@@ -238,9 +342,22 @@ def _transactions_from_pdf_text(pages_text: List[str]) -> List[Dict[str, Any]]:
                 "transaction_type": tx_type,
                 "category": _infer_category(desc, desc),
                 "reference": None,
-                "balance_after": None
+                "balance_after": None,
+                "metadata": {"page_number": page_num}
             })
     return out
+
+
+def _transactions_from_pdf_text(pages_text: List[str]) -> List[Dict[str, Any]]:
+    """Best-effort transaction extraction from PDF text. Tries the multi-line
+    "record card" layout first (the common shape for UPI/wallet statement
+    exports), then falls back to single-line-per-row parsing. Zero matches
+    from either is a valid, honest outcome — never invents rows for an
+    unrecognized statement layout."""
+    records = _transactions_from_pdf_record_blocks(pages_text)
+    if records:
+        return records
+    return _transactions_from_pdf_singleline(pages_text)
 
 
 def _chunk_pdf_pages(pages_text: List[str]) -> List[Dict[str, Any]]:
@@ -352,7 +469,8 @@ class DocumentIngestionPipeline:
                 """, (
                     tx_id, account_id, document_id, tx["transaction_date"],
                     tx["description"], tx["merchant"], tx["amount"], tx["transaction_type"],
-                    tx["category"], tx["reference"], tx["balance_after"], json.dumps({}), now_str
+                    tx["category"], tx["reference"], tx["balance_after"],
+                    json.dumps(tx.get("metadata", {})), now_str
                 ))
 
             embedded_count = 0
@@ -372,12 +490,30 @@ class DocumentIngestionPipeline:
                     spec.get("page_number"), spec.get("section"), json.dumps({})
                 ))
 
+            # A document that produced searchable chunks but zero structured
+            # transactions is not silently "fully ready" if its type is one
+            # that's normally expected to contain transactions — the RAG side
+            # works, but any SQL-backed financial analysis over it will find
+            # nothing. Surface that distinction rather than hiding it behind
+            # a plain READY badge.
+            final_status = "ready"
+            status_note = None
+            if len(transactions) == 0 and len(chunk_specs) > 0 and detected_type in _TRANSACTION_BEARING_TYPES:
+                final_status = "partial"
+                status_note = (
+                    "Document indexed for search, but no structured transaction rows could be "
+                    "confidently extracted from its layout. Numeric/SQL-based questions (totals, "
+                    "comparisons, largest transaction) will not see this document's data; "
+                    "document-text questions still work."
+                )
+
             c.execute("""
                 UPDATE financial_documents SET
-                    processing_status = 'ready',
+                    processing_status = %s,
+                    error_message = %s,
                     metadata_json = %s
                 WHERE document_id = %s;
-            """, (json.dumps({
+            """, (final_status, status_note, json.dumps({
                 "transactions_extracted": len(transactions),
                 "chunks_created": len(chunk_specs),
                 "chunks_embedded": embedded_count
