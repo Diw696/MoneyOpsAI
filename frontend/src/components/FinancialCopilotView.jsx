@@ -168,9 +168,18 @@ export default function FinancialCopilotView({ incidents, onSelectIncident }) {
   const [query, setQuery] = useState('');
   const [asking, setAsking] = useState(false);
   const [conversation, setConversation] = useState([]); // [{id, question, status, report, error, run_id, model, timestamp}]
-  const [selectedRunId, setSelectedRunId] = useState(null);
   const [showTransactions, setShowTransactions] = useState(false);
   const [transactionList, setTransactionList] = useState([]);
+
+  // History accordion — purely a read-only preview of a stored run. Never
+  // touches `conversation` (the active chat) and never calls askCopilot.
+  // expandedHistoryIds is a Set so independent rows can be open at once;
+  // historyDetailCache holds fetched financial_analysis_runs detail so
+  // re-toggling the same row never re-fetches, let alone re-runs Gemini.
+  const [expandedHistoryIds, setExpandedHistoryIds] = useState(() => new Set());
+  const [historyDetailCache, setHistoryDetailCache] = useState({});
+  const [historyLoadingId, setHistoryLoadingId] = useState(null);
+  const queryInputRef = useRef(null);
 
   const [previewDoc, setPreviewDoc] = useState(null); // {document, transactions, chunks}
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -228,7 +237,6 @@ export default function FinancialCopilotView({ incidents, onSelectIncident }) {
     setConversation(prev => [...prev, { id: turnId, question, status: 'loading', timestamp: new Date().toISOString() }]);
     setQuery('');
     setAsking(true);
-    setSelectedRunId(null);
 
     try {
       const result = await askCopilot(question);
@@ -243,30 +251,61 @@ export default function FinancialCopilotView({ incidents, onSelectIncident }) {
     }
   };
 
-  const handleOpenHistory = async (run) => {
-    setSelectedRunId(run.run_id);
-    const existing = conversation.find(t => t.run_id === run.run_id);
-    if (existing) {
-      conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      return;
-    }
+  // Toggling a history row is purely a local read: it never mutates
+  // `conversation` and the only network call it can make is fetching the
+  // already-stored run detail (GET /financial/copilot/runs/{id}) — never
+  // askCopilot, so opening/closing history can never trigger a Gemini call.
+  const toggleHistory = async (run) => {
+    setExpandedHistoryIds(prev => {
+      const next = new Set(prev);
+      if (next.has(run.run_id)) {
+        next.delete(run.run_id);
+      } else {
+        next.add(run.run_id);
+      }
+      return next;
+    });
+
+    if (historyDetailCache[run.run_id]) return; // already fetched — no re-fetch, no re-run
+
+    setHistoryLoadingId(run.run_id);
     try {
       const detail = await fetchCopilotRun(run.run_id);
       const isError = detail.response && detail.response.error;
-      setConversation(prev => [...prev, {
-        id: `hist_${run.run_id}`,
-        question: detail.query,
-        status: isError ? 'error' : 'done',
-        report: isError ? null : detail.response,
-        error: isError ? detail.response.error : null,
-        run_id: detail.run_id,
-        model: detail.model,
-        timestamp: detail.created_at,
-        isHistorical: true
-      }]);
+      setHistoryDetailCache(prev => ({
+        ...prev,
+        [run.run_id]: {
+          question: detail.query,
+          isError,
+          report: isError ? null : detail.response,
+          error: isError ? detail.response.error : null,
+          model: detail.model,
+          timestamp: detail.created_at
+        }
+      }));
     } catch (e) {
       console.error('Failed to load history entry:', e);
+    } finally {
+      setHistoryLoadingId(null);
     }
+  };
+
+  // "Continue this investigation" deliberately does NOT call askCopilot on
+  // its own — it only moves the historical question into the active input
+  // box so the user's own next "Ask" click is the one real, intentional
+  // Gemini request. This can never duplicate a financial_analysis_runs
+  // record, since nothing is submitted until the user acts.
+  const handleContinueInvestigation = (runId) => {
+    const cached = historyDetailCache[runId];
+    if (!cached) return;
+    setQuery(cached.question);
+    setExpandedHistoryIds(prev => {
+      const next = new Set(prev);
+      next.delete(runId);
+      return next;
+    });
+    queryInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    queryInputRef.current?.focus();
   };
 
   const handleViewTransactions = async () => {
@@ -521,11 +560,11 @@ export default function FinancialCopilotView({ incidents, onSelectIncident }) {
                 {/* ASSISTANT MESSAGE */}
                 <div style={{
                   alignSelf: 'flex-start', width: '100%',
-                  border: turn.run_id === selectedRunId ? '1px solid rgba(99, 102, 241, 0.5)' : '1px solid var(--border)',
+                  border: '1px solid var(--border)',
                   borderRadius: '10px', padding: '18px', background: 'rgba(0,0,0,0.12)'
                 }}>
                   <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '10px' }}>
-                    MoneyOps AI {turn.isHistorical && <span style={{ color: '#60a5fa' }}>· from history</span>}
+                    MoneyOps AI
                   </div>
                   {turn.status === 'loading' && <LoadingBubble />}
                   {turn.status === 'error' && (
@@ -543,6 +582,7 @@ export default function FinancialCopilotView({ incidents, onSelectIncident }) {
 
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <input
+            ref={queryInputRef}
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
@@ -600,23 +640,69 @@ export default function FinancialCopilotView({ incidents, onSelectIncident }) {
         </div>
       )}
 
-      {/* RUN HISTORY (Copilot auditability — click to restore, never re-runs Gemini) */}
+      {/* RUN HISTORY — expandable/collapsible preview only. Expanding a row
+          NEVER touches the active conversation above and NEVER calls Gemini;
+          it only reads the already-stored financial_analysis_runs record. */}
       {runs.length > 0 && (
         <div className="card" style={{ padding: '20px' }}>
           <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text)', marginBottom: '10px' }}>Recent Investigations</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {runs.map(r => (
-              <button key={r.run_id} onClick={() => handleOpenHistory(r)}
-                style={{
-                  display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '12px', padding: '8px 10px',
-                  background: selectedRunId === r.run_id ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255,255,255,0.02)',
-                  border: selectedRunId === r.run_id ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid transparent',
-                  borderRadius: '4px', flexWrap: 'wrap', cursor: 'pointer', textAlign: 'left', width: '100%'
+            {runs.map(r => {
+              const isExpanded = expandedHistoryIds.has(r.run_id);
+              const detail = historyDetailCache[r.run_id];
+              const isLoadingDetail = historyLoadingId === r.run_id;
+              return (
+                <div key={r.run_id} style={{
+                  border: isExpanded ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid transparent',
+                  borderRadius: '6px', overflow: 'hidden',
+                  background: isExpanded ? 'rgba(99, 102, 241, 0.06)' : 'transparent'
                 }}>
-                <span style={{ color: 'var(--text)' }}>{r.query}</span>
-                <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace' }}>{new Date(r.created_at).toLocaleString()}</span>
-              </button>
-            ))}
+                  <button
+                    onClick={() => toggleHistory(r)}
+                    aria-expanded={isExpanded}
+                    style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', fontSize: '12px', padding: '8px 10px',
+                      background: isExpanded ? 'transparent' : 'rgba(255,255,255,0.02)',
+                      border: 'none', borderRadius: '4px', flexWrap: 'wrap', cursor: 'pointer', textAlign: 'left', width: '100%'
+                    }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text)', flex: 1, minWidth: 0 }}>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '10px', flexShrink: 0 }}>{isExpanded ? '▾' : '▸'}</span>
+                      <span>{r.query}</span>
+                    </span>
+                    <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace', flexShrink: 0 }}>{new Date(r.created_at).toLocaleString()}</span>
+                  </button>
+
+                  {isExpanded && (
+                    <div style={{ padding: '4px 14px 14px 26px', borderTop: '1px solid rgba(99, 102, 241, 0.2)' }}>
+                      <div style={{ fontSize: '10px', fontWeight: '700', color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '10px 0' }}>
+                        From History
+                      </div>
+                      {isLoadingDetail && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '12px' }}>
+                          <span className="spinner"></span>
+                          <span>Loading stored answer…</span>
+                        </div>
+                      )}
+                      {!isLoadingDetail && detail && detail.isError && (
+                        <div style={{ color: '#f87171', fontSize: '12px' }}><strong>Copilot Notice:</strong> {detail.error}</div>
+                      )}
+                      {!isLoadingDetail && detail && !detail.isError && detail.report && (
+                        <>
+                          <div style={{ fontSize: '13px' }}>
+                            <AnswerBody report={detail.report} incidents={incidents} onSelectIncident={onSelectIncident} onViewTransactions={handleViewTransactions} />
+                          </div>
+                          <button
+                            onClick={() => handleContinueInvestigation(r.run_id)}
+                            style={{ marginTop: '14px', background: 'rgba(99, 102, 241, 0.12)', border: '1px solid rgba(99, 102, 241, 0.35)', color: 'var(--primary)', fontSize: '12px', fontWeight: '700', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}>
+                            ↻ Continue this investigation
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
