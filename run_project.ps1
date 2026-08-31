@@ -7,12 +7,12 @@ Set-Location $PSScriptRoot
 
 # 1. Start PostgreSQL
 Write-Host "`n[1/3] Starting PostgreSQL Server on port 5432..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "& 'C:\Users\asus\.postgresql\bin\postgres.exe' -D 'C:\Program Files\PostgreSQL\18\data'" -WindowStyle Minimized
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "if (Get-NetTCPConnection -LocalPort 5432 -State Listen -ErrorAction SilentlyContinue) { Write-Host 'PostgreSQL is already running on port 5432.' -ForegroundColor Green } else { & 'C:\Program Files\PostgreSQL\18\bin\postgres.exe' -D 'C:\Program Files\PostgreSQL\18\data' }" -WindowStyle Minimized
 Start-Sleep -Seconds 2
 
 # 2. Start FastAPI Backend
 Write-Host "[2/3] Starting FastAPI Backend on http://127.0.0.1:8000..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$env:PYTHONPATH='backend'; .\venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$env:PYTHONPATH='backend'; if (Test-Path '.\venv\Scripts\python.exe') { .\venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload } else { .\backend\venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload }"
 
 Start-Sleep -Seconds 2
 

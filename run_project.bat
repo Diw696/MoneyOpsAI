@@ -6,12 +6,12 @@ echo ============================================================
 cd /d "%~dp0"
 
 echo [1/3] Starting PostgreSQL Server (if not running)...
-start "MoneyOps - PostgreSQL" powershell -NoExit -Command "& 'C:\Users\asus\.postgresql\bin\postgres.exe' -D 'C:\Program Files\PostgreSQL\18\data'"
+start "MoneyOps - PostgreSQL" powershell -NoExit -Command "if (Get-NetTCPConnection -LocalPort 5432 -State Listen -ErrorAction SilentlyContinue) { Write-Host 'PostgreSQL is already running on port 5432.' -ForegroundColor Green } else { & 'C:\Program Files\PostgreSQL\18\bin\postgres.exe' -D 'C:\Program Files\PostgreSQL\18\data' }"
 
 timeout /t 2 /nobreak >nul
 
 echo [2/3] Starting FastAPI Backend on http://127.0.0.1:8000...
-start "MoneyOps - Backend API" powershell -NoExit -Command "$env:PYTHONPATH='backend'; .\venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
+start "MoneyOps - Backend API" powershell -NoExit -Command "$env:PYTHONPATH='backend'; if (Test-Path '.\venv\Scripts\python.exe') { .\venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload } else { .\backend\venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload }"
 
 timeout /t 2 /nobreak >nul
 
