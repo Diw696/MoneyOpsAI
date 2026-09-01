@@ -1,9 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Plus, X, FileText, AlertTriangle, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
 import {
   uploadFinancialDocument, fetchFinancialDocuments, fetchFinancialSummary,
   fetchFinancialTransactions, askCopilot, fetchCopilotRuns, fetchCopilotRun,
   financialDocumentDownloadUrl, fetchFinancialDocumentPreview, deleteFinancialDocument
 } from '../api';
+import { Metric, Button, Chip, Skeleton } from '../primitives';
+import { usePrefersReducedMotion } from '../hooks/useMotionGuards';
 
 const SUGGESTED_QUESTIONS = [
   "Find unusual transactions",
@@ -23,12 +27,8 @@ const DOC_TYPE_OPTIONS = [
   { value: 'refund_report', label: 'Refund Report' }
 ];
 
-const STATUS_BADGE = {
-  ready: { label: 'READY', color: '#34d399', bg: 'rgba(52, 211, 153, 0.12)' },
-  processing: { label: 'PROCESSING', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.12)' },
-  partial: { label: 'READY — SEARCH ONLY', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.12)' },
-  failed: { label: 'FAILED', color: '#f87171', bg: 'rgba(248, 113, 113, 0.12)' }
-};
+const STATUS_TONE = { ready: 'verified', processing: 'accent', partial: 'medium', failed: 'critical' };
+const STATUS_LABEL = { ready: 'Ready', processing: 'Processing', partial: 'Ready — search only', failed: 'Failed' };
 
 const LOADING_PHASES = [
   "Analyzing your financial data…",
@@ -36,20 +36,34 @@ const LOADING_PHASES = [
   "Preparing your answer…"
 ];
 
-function LoadingBubble() {
+// Intentional loading, not a generic spinner: a small status line + a
+// Skeleton standing in the exact shape the real answer is about to take
+// (a lede line + two evidence rows), so the transition into the real
+// content reads as a continuation rather than content "suddenly appearing".
+function AnswerLoading() {
   const [phase, setPhase] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setPhase(p => (p + 1) % LOADING_PHASES.length), 1600);
     return () => clearInterval(id);
   }, []);
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-muted)', fontSize: '13px' }}>
-      <span className="spinner"></span>
-      <span>{LOADING_PHASES[phase]}</span>
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--cc-text-tertiary)', fontSize: '12.5px', marginBottom: '14px' }}>
+        <span className="spinner"></span>
+        <span>{LOADING_PHASES[phase]}</span>
+      </div>
+      <Skeleton variant="text" lines={2} />
+      <div style={{ marginTop: '18px' }}>
+        <Skeleton variant="block" height="52px" />
+      </div>
     </div>
   );
 }
 
+// The investigation-result surface. Deliberately not a "chat bubble" —
+// answer as the lede, then labeled evidence sections separated by
+// whitespace/dividers, matching the rest of this system's card-free
+// composition rather than nested boxes-within-a-box.
 function AnswerBody({ report, incidents, onSelectIncident, onViewTransactions }) {
   const matchedIncidentFor = (merchant) => {
     if (!merchant || !incidents) return null;
@@ -58,25 +72,24 @@ function AnswerBody({ report, incidents, onSelectIncident, onViewTransactions })
   };
 
   return (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Answer</div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div>
         {report.insufficient_evidence && (
-          <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(251, 191, 36, 0.12)', color: '#fbbf24', fontWeight: '700' }}>INSUFFICIENT EVIDENCE</span>
+          <Chip tone="medium" className="cc-mb-8">Insufficient evidence</Chip>
         )}
+        <p style={{ fontSize: '17px', lineHeight: '1.5', color: 'var(--cc-text-primary)', margin: '6px 0 0', fontWeight: 550 }}>
+          {report.answer}
+        </p>
       </div>
-      <p style={{ fontSize: '16px', lineHeight: '1.6', color: 'var(--text)', margin: '0 0 20px 0', fontWeight: '600' }}>
-        {report.answer}
-      </p>
 
       {report.primary_drivers?.length > 0 && (
-        <div style={{ marginBottom: '18px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Primary Drivers</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div>
+          <p className="cc-section-eyebrow" style={{ marginBottom: '8px' }}>Primary drivers</p>
+          <div className="cc-row-list">
             {report.primary_drivers.map((d, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', padding: '6px 10px', background: 'rgba(0,0,0,0.15)', borderRadius: '4px' }}>
-                <span style={{ color: 'var(--text)' }}>{d.label}</span>
-                <span style={{ color: d.direction === 'increase' ? '#f87171' : '#34d399', fontWeight: '700' }}>
+              <div key={i} className="cc-row" style={{ padding: '8px 0' }}>
+                <span style={{ color: 'var(--cc-text-secondary)', fontSize: '13px' }}>{d.label}</span>
+                <span className="text-data" style={{ color: d.direction === 'increase' ? 'var(--sev-critical)' : 'var(--state-verified)', fontWeight: 700 }}>
                   {d.direction === 'increase' ? '+' : '−'}₹{Math.abs(d.amount).toLocaleString('en-IN')}
                 </span>
               </div>
@@ -86,28 +99,30 @@ function AnswerBody({ report, incidents, onSelectIncident, onViewTransactions })
       )}
 
       {report.notable_transactions?.length > 0 && (
-        <div style={{ marginBottom: '18px' }}>
+        <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Notable Transactions</div>
-            <button onClick={onViewTransactions} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>
-              [View Transactions]
+            <p className="cc-section-eyebrow" style={{ margin: 0 }}>Notable transactions</p>
+            <button onClick={onViewTransactions} data-cursor="hover" style={{ background: 'none', border: 'none', color: 'var(--cc-accent)', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }}>
+              View all transactions
             </button>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {report.notable_transactions.map((t, i) => {
               const matched = matchedIncidentFor(t.merchant);
               return (
-                <div key={i} style={{ padding: '10px 12px', background: 'rgba(0,0,0,0.15)', borderRadius: '6px' }}>
+                <div key={i} style={{ paddingBottom: '10px', borderBottom: '1px solid var(--line-hair)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                    <span style={{ fontSize: '13px', color: 'var(--text)', fontWeight: '600' }}>{t.merchant}</span>
-                    <span style={{ fontSize: '13px', color: '#f87171', fontWeight: '700' }}>₹{Number(t.amount).toLocaleString('en-IN')}</span>
+                    <span style={{ fontSize: '13px', color: 'var(--cc-text-primary)', fontWeight: 600 }}>{t.merchant}</span>
+                    <span className="text-data" style={{ color: 'var(--sev-critical)', fontWeight: 700 }}>₹{Number(t.amount).toLocaleString('en-IN')}</span>
                   </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{t.date} · {t.reason}</div>
+                  <div className="text-data" style={{ marginTop: '2px' }}>{t.date} · {t.reason}</div>
                   {matched && (
                     <button
                       onClick={() => onSelectIncident && onSelectIncident(matched)}
-                      style={{ marginTop: '6px', background: 'rgba(248, 113, 113, 0.12)', border: '1px solid rgba(248, 113, 113, 0.3)', color: '#f87171', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer' }}>
-                      ⚠ Related MoneyOps incident found — [Open Investigation]
+                      data-cursor="hover"
+                      style={{ marginTop: '8px', display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'none', border: '1px solid var(--sev-critical)', color: 'var(--sev-critical)', fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: 'var(--r-sm)', cursor: 'pointer' }}>
+                      <AlertTriangle size={11} strokeWidth={2} />
+                      Related MoneyOps incident found — open investigation
                     </button>
                   )}
                 </div>
@@ -118,18 +133,16 @@ function AnswerBody({ report, incidents, onSelectIncident, onViewTransactions })
       )}
 
       {report.evidence?.length > 0 && (
-        <div style={{ marginBottom: '18px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Evidence</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div>
+          <p className="cc-section-eyebrow" style={{ marginBottom: '8px' }}>Evidence</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {report.evidence.map((e, i) => (
-              <div key={i} style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', flexShrink: 0, marginTop: '1px',
-                  background: e.type === 'calculation' ? 'rgba(96, 165, 250, 0.12)' : e.type === 'document' ? 'rgba(167, 139, 250, 0.12)' : 'rgba(52, 211, 153, 0.12)',
-                  color: e.type === 'calculation' ? '#60a5fa' : e.type === 'document' ? '#a78bfa' : '#34d399' }}>
-                  {e.type === 'calculation' ? 'DETERMINISTIC CALC' : e.type === 'document' ? 'DOCUMENT' : 'TRANSACTION'}
-                </span>
-                <span>
-                  {e.filename && <strong style={{ color: 'var(--text)' }}>{e.filename}{e.page ? ` (p.${e.page})` : ''}{e.section ? ` — ${e.section}` : ''}: </strong>}
+              <div key={i} style={{ fontSize: '12px', color: 'var(--cc-text-tertiary)', display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                <Chip tone={e.type === 'calculation' ? 'accent' : e.type === 'document' ? 'neutral' : 'verified'}>
+                  {e.type === 'calculation' ? 'Calc' : e.type === 'document' ? 'Doc' : 'Txn'}
+                </Chip>
+                <span style={{ paddingTop: '2px' }}>
+                  {e.filename && <strong style={{ color: 'var(--cc-text-secondary)' }}>{e.filename}{e.page ? ` (p.${e.page})` : ''}{e.section ? ` — ${e.section}` : ''}: </strong>}
                   {e.detail}
                 </span>
               </div>
@@ -140,21 +153,23 @@ function AnswerBody({ report, incidents, onSelectIncident, onViewTransactions })
 
       {report.sources_consulted?.length > 0 && (
         <div>
-          <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Sources Consulted</div>
+          <p className="cc-section-eyebrow" style={{ marginBottom: '8px' }}>Sources consulted</p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
             {report.sources_consulted.map((s, i) => (
-              <span key={i} style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '4px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                📄 {s.filename}{s.page ? ` · p.${s.page}` : ''}{s.section ? ` · ${s.section}` : ''}
-              </span>
+              <Chip key={i}>
+                <FileText size={11} strokeWidth={2} style={{ marginRight: 4, verticalAlign: '-1px' }} />
+                {s.filename}{s.page ? ` · p.${s.page}` : ''}{s.section ? ` · ${s.section}` : ''}
+              </Chip>
             ))}
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
 export default function FinancialCopilotView({ incidents, onSelectIncident }) {
+  const prefersReducedMotion = usePrefersReducedMotion();
   const [summary, setSummary] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [runs, setRuns] = useState([]);
@@ -216,7 +231,7 @@ export default function FinancialCopilotView({ incidents, onSelectIncident }) {
     try {
       const result = await uploadFinancialDocument(uploadFile, uploadType || null, uploadAccount || null);
       if (result.processing_status === 'ready') {
-        setUploadNotice({ type: 'success', text: `✓ ${result.filename} indexed — ${result.transactions_extracted} transactions extracted, ${result.chunks_embedded}/${result.chunks_created} chunks embedded.` });
+        setUploadNotice({ type: 'success', text: `${result.filename} indexed — ${result.transactions_extracted} transactions extracted, ${result.chunks_embedded}/${result.chunks_created} chunks embedded.` });
       } else {
         setUploadNotice({ type: 'error', text: `${result.filename} failed to process: ${result.error_message || 'Unknown error'}` });
       }
@@ -349,229 +364,208 @@ export default function FinancialCopilotView({ incidents, onSelectIncident }) {
   };
 
   return (
-    <div className="view-container" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div className="cc-page">
 
-      {/* HEADER */}
-      <div className="card" style={{ padding: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
-          <div>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
-              Financial Intelligence Copilot
-            </div>
-            <h1 style={{ fontSize: '22px', fontWeight: '800', color: 'var(--text)', margin: 0 }}>
-              Your financial evidence, analyzed with AI.
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '6px 0 0 0' }}>
-              Hybrid retrieval over your uploaded statements and policies — structured PostgreSQL analytics + document RAG + Gemini reasoning, always grounded in real evidence.
-            </p>
-          </div>
-          <button className="btn btn-primary" onClick={() => setShowUpload(v => !v)} style={{ padding: '10px 20px', fontWeight: '700', fontSize: '13px' }}>
-            + Upload Financial Data
-          </button>
+      {/* PAGE CONTEXT */}
+      <div className="cc-page-header" style={{ maxWidth: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '16px' }}>
+        <div style={{ maxWidth: 640 }}>
+          <p className="cc-section-eyebrow" style={{ color: 'var(--cc-accent)' }}>Financial Intelligence Copilot</p>
+          <h1 className="text-page-title">What are we investigating?</h1>
+          <p className="cc-page-desc">
+            Hybrid retrieval over your uploaded statements and policies — structured PostgreSQL analytics,
+            document RAG, and Gemini reasoning, always grounded in real evidence.
+          </p>
         </div>
-
-        {showUpload && (
-          <div style={{ marginTop: '20px', padding: '16px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: '8px', display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-end' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>File (PDF, CSV, XLSX)</label>
-              <input type="file" accept=".pdf,.csv,.xlsx,.xls" onChange={e => setUploadFile(e.target.files[0] || null)} style={{ fontSize: '12px', color: 'var(--text)' }} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Document Type</label>
-              <select value={uploadType} onChange={e => setUploadType(e.target.value)} style={{ padding: '6px 8px', borderRadius: '6px', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: '12px' }}>
-                {DOC_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Account Name (optional)</label>
-              <input type="text" value={uploadAccount} onChange={e => setUploadAccount(e.target.value)} placeholder="Primary Business Account"
-                style={{ padding: '6px 8px', borderRadius: '6px', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: '12px' }} />
-            </div>
-            <button className="btn" onClick={handleUpload} disabled={!uploadFile || uploading}
-              style={{ background: 'rgba(99, 102, 241, 0.15)', borderColor: 'rgba(99, 102, 241, 0.4)', color: 'var(--primary)', padding: '8px 16px', fontSize: '12px', fontWeight: '600' }}>
-              {uploading ? 'Processing…' : 'Ingest Document'}
-            </button>
-          </div>
-        )}
-
-        {uploadNotice && (
-          <div style={{ marginTop: '12px', padding: '10px 14px', borderRadius: '6px', fontSize: '12px',
-            background: uploadNotice.type === 'success' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-            border: `1px solid ${uploadNotice.type === 'success' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-            color: uploadNotice.type === 'success' ? '#10b981' : '#f87171' }}>
-            {uploadNotice.text}
-          </div>
-        )}
+        <Button tier="primary" onClick={() => setShowUpload(v => !v)}>
+          <Plus size={13} strokeWidth={2} style={{ marginRight: 6 }} />
+          Upload financial data
+        </Button>
       </div>
 
-      {/* CONNECTED DATA SUMMARY */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Documents</div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text)', marginTop: '8px' }}>{summary?.documents ?? 0}</div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{summary?.documents_ready ?? 0} ready for retrieval</div>
+      {showUpload && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', alignItems: 'flex-end', padding: '16px 0', borderTop: '1px solid var(--line-hair)', borderBottom: '1px solid var(--line-hair)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label className="cc-section-eyebrow" style={{ margin: 0 }}>File (PDF, CSV, XLSX)</label>
+            <input type="file" accept=".pdf,.csv,.xlsx,.xls" onChange={e => setUploadFile(e.target.files[0] || null)} style={{ fontSize: '12px', color: 'var(--cc-text-primary)' }} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label className="cc-section-eyebrow" style={{ margin: 0 }}>Document type</label>
+            <select value={uploadType} onChange={e => setUploadType(e.target.value)} style={{ padding: '7px 10px', borderRadius: 'var(--r-sm)', background: 'var(--ink-raised)', border: '1px solid var(--line-solid)', color: 'var(--cc-text-primary)', fontSize: '12px' }}>
+              {DOC_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label className="cc-section-eyebrow" style={{ margin: 0 }}>Account name (optional)</label>
+            <input type="text" value={uploadAccount} onChange={e => setUploadAccount(e.target.value)} placeholder="Primary Business Account"
+              style={{ padding: '7px 10px', borderRadius: 'var(--r-sm)', background: 'var(--ink-raised)', border: '1px solid var(--line-solid)', color: 'var(--cc-text-primary)', fontSize: '12px' }} />
+          </div>
+          <Button tier="secondary" onClick={handleUpload} disabled={!uploadFile} state={uploading ? 'loading' : 'idle'} loadingLabel="Processing">
+            Ingest document
+          </Button>
         </div>
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Transactions</div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text)', marginTop: '8px' }}>{(summary?.transactions ?? 0).toLocaleString('en-IN')}</div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Structured, in PostgreSQL</div>
-        </div>
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Accounts</div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text)', marginTop: '8px' }}>{summary?.accounts ?? 0}</div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Derived from uploads</div>
-        </div>
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Volume</div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text)', marginTop: '8px' }}>₹{(summary?.total_volume_inr ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Across all transactions</div>
-        </div>
+      )}
+
+      {uploadNotice && (
+        <p style={{ margin: 0, fontSize: '12.5px', color: uploadNotice.type === 'success' ? 'var(--state-verified)' : 'var(--sev-critical)' }}>
+          {uploadNotice.text}
+        </p>
+      )}
+
+      {/* CONNECTED DATA — hierarchy, not four identical boxes */}
+      <div className="cc-metric-band">
+        <Metric size="lg" label="Total volume" value={`₹${(summary?.total_volume_inr ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`} sub="Across all transactions" />
+        <div className="cc-metric-band-divider" />
+        <Metric size="lg" label="Transactions" value={(summary?.transactions ?? 0).toLocaleString('en-IN')} sub="Structured, in PostgreSQL" />
+        <div className="cc-metric-band-divider" />
+        <Metric size="sm" label="Documents" value={summary?.documents ?? 0} sub={`${summary?.documents_ready ?? 0} ready for retrieval`} />
+        <div className="cc-metric-band-divider" />
+        <Metric size="sm" label="Accounts" value={summary?.accounts ?? 0} sub="Derived from uploads" />
       </div>
 
-      {/* DOCUMENT LIBRARY */}
-      <div className="card" style={{ padding: '20px' }}>
-        <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text)', marginBottom: '12px' }}>Connected Documents</div>
+      {/* DOCUMENT LIBRARY — source material index, not icon cards */}
+      <section>
+        <p className="cc-section-eyebrow" style={{ marginBottom: '4px' }}>Context</p>
+        <h2 className="text-card-title" style={{ margin: '0 0 12px' }}>Connected documents</h2>
         {documents.length === 0 ? (
-          <div style={{ fontSize: '13px', color: 'var(--text-muted)', padding: '12px 0' }}>No documents uploaded yet.</div>
+          <p style={{ fontSize: '13px', color: 'var(--cc-text-tertiary)' }}>No documents uploaded yet.</p>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="cc-row-list">
             {documents.map(d => {
-              const badge = STATUS_BADGE[d.processing_status] || STATUS_BADGE.processing;
               const isCsv = d.content_type && d.content_type.includes('csv');
               const isPdf = d.content_type === 'application/pdf';
               return (
-                <div key={d.document_id} style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <div key={d.document_id} className="cc-row" style={{ alignItems: 'flex-start' }}>
+                  <div className="cc-row-main" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '10px', color: badge.color, background: badge.bg, fontWeight: '700' }}>{badge.label}</span>
-                      <span style={{ fontSize: '13px', color: 'var(--text)', fontWeight: '600' }}>{d.filename}</span>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{d.document_type}</span>
+                      <Chip tone={STATUS_TONE[d.processing_status] || 'accent'}>{STATUS_LABEL[d.processing_status] || 'Processing'}</Chip>
+                      <span style={{ fontSize: '13px', color: 'var(--cc-text-primary)', fontWeight: 600 }}>{d.filename}</span>
+                      <span className="text-data">{d.document_type}</span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      {d.has_raw_content && (
-                        <button onClick={() => handleView(d)} disabled={previewLoading}
-                          style={{ background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.3)', color: 'var(--primary)', fontSize: '11px', fontWeight: '600', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer' }}>
-                          {isPdf ? 'View' : isCsv ? 'Preview' : 'View'}
-                        </button>
-                      )}
-                      {d.has_raw_content && (
-                        <a href={financialDocumentDownloadUrl(d.document_id, 'attachment')}
-                          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '11px', fontWeight: '600', padding: '4px 10px', borderRadius: '4px', textDecoration: 'none' }}>
-                          Download
-                        </a>
-                      )}
-                      {confirmDeleteId === d.document_id ? (
-                        <span style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: '#fbbf24' }}>Delete permanently?</span>
-                          <button onClick={() => handleDelete(d.document_id)} disabled={deletingId === d.document_id}
-                            style={{ background: 'rgba(248, 113, 113, 0.15)', border: '1px solid rgba(248, 113, 113, 0.4)', color: '#f87171', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer' }}>
-                            {deletingId === d.document_id ? 'Removing…' : 'Yes, delete'}
-                          </button>
-                          <button onClick={() => setConfirmDeleteId(null)} style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '11px', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer' }}>
-                            Cancel
-                          </button>
-                        </span>
-                      ) : (
-                        <button onClick={() => setConfirmDeleteId(d.document_id)}
-                          style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '11px', fontWeight: '600', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer' }}>
-                          Remove
-                        </button>
-                      )}
+                    <div className="text-data" style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
+                      <span>{d.chunk_count} chunk{d.chunk_count === 1 ? '' : 's'} indexed</span>
+                      <span>{d.transaction_count} transaction{d.transaction_count === 1 ? '' : 's'} extracted</span>
+                      <span>Uploaded {new Date(d.uploaded_at).toLocaleString()}</span>
+                      {!d.has_raw_content && <span style={{ color: 'var(--sev-medium)' }}>Original file unavailable</span>}
                     </div>
+                    {(d.processing_status === 'failed' || d.processing_status === 'partial') && d.error_message && (
+                      <div style={{ fontSize: '11px', color: d.processing_status === 'failed' ? 'var(--sev-critical)' : 'var(--sev-medium)' }}>{d.error_message}</div>
+                    )}
                   </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px', display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
-                    <span>{d.chunk_count} chunk{d.chunk_count === 1 ? '' : 's'} indexed</span>
-                    <span>{d.transaction_count} transaction{d.transaction_count === 1 ? '' : 's'} extracted</span>
-                    <span>Uploaded {new Date(d.uploaded_at).toLocaleString()}</span>
-                    {!d.has_raw_content && <span style={{ color: '#fbbf24' }}>Original file unavailable (uploaded before file storage)</span>}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                    {d.has_raw_content && (
+                      <button onClick={() => handleView(d)} disabled={previewLoading} data-cursor="hover"
+                        style={{ background: 'none', border: '1px solid var(--line-solid)', color: 'var(--cc-accent)', fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: 'var(--r-sm)', cursor: 'pointer' }}>
+                        {isPdf ? 'View' : isCsv ? 'Preview' : 'View'}
+                      </button>
+                    )}
+                    {d.has_raw_content && (
+                      <a href={financialDocumentDownloadUrl(d.document_id, 'attachment')} data-cursor="hover"
+                        style={{ background: 'none', border: '1px solid var(--line-hair)', color: 'var(--cc-text-tertiary)', fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: 'var(--r-sm)', textDecoration: 'none' }}>
+                        Download
+                      </a>
+                    )}
+                    {confirmDeleteId === d.document_id ? (
+                      <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--sev-medium)' }}>Delete permanently?</span>
+                        <Button tier="ghost" tone="critical" onClick={() => handleDelete(d.document_id)} state={deletingId === d.document_id ? 'loading' : 'idle'} loadingLabel="Removing">
+                          Yes, delete
+                        </Button>
+                        <button onClick={() => setConfirmDeleteId(null)} data-cursor="hover" style={{ background: 'none', border: '1px solid var(--line-hair)', color: 'var(--cc-text-tertiary)', fontSize: '11px', padding: '4px 10px', borderRadius: 'var(--r-sm)', cursor: 'pointer' }}>
+                          Cancel
+                        </button>
+                      </span>
+                    ) : (
+                      <button onClick={() => setConfirmDeleteId(d.document_id)} data-cursor="hover"
+                        style={{ background: 'none', border: '1px solid var(--line-hair)', color: 'var(--cc-text-tertiary)', fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: 'var(--r-sm)', cursor: 'pointer' }}>
+                        Remove
+                      </button>
+                    )}
                   </div>
-                  {(d.processing_status === 'failed' || d.processing_status === 'partial') && d.error_message && (
-                    <div style={{ fontSize: '11px', color: d.processing_status === 'failed' ? '#f87171' : '#fbbf24', marginTop: '4px' }}>{d.error_message}</div>
-                  )}
                 </div>
               );
             })}
           </div>
         )}
-      </div>
+      </section>
 
       {/* PREVIEW MODAL (CSV/XLSX table preview) */}
       {previewDoc && (
-        <div onClick={() => setPreviewDoc(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
-          <div onClick={e => e.stopPropagation()} className="card" style={{ maxWidth: '900px', width: '100%', maxHeight: '80vh', overflowY: 'auto', padding: '24px' }}>
+        <div onClick={() => setPreviewDoc(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(4,6,8,0.7)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+          <div onClick={e => e.stopPropagation()} style={{ maxWidth: '900px', width: '100%', maxHeight: '80vh', overflowY: 'auto', padding: '24px', background: 'var(--ink-base)', border: '1px solid var(--line-solid)', borderRadius: 'var(--r-md)', boxShadow: 'var(--shadow-float)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <div style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text)' }}>{previewDoc.document.filename}</div>
-              <button onClick={() => setPreviewDoc(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+              <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--cc-text-primary)' }}>{previewDoc.document.filename}</div>
+              <button onClick={() => setPreviewDoc(null)} data-cursor="hover" style={{ background: 'none', border: 'none', color: 'var(--cc-text-tertiary)', cursor: 'pointer' }}><X size={16} /></button>
             </div>
             {previewDoc.transactions.length > 0 ? (
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                   <thead>
-                    <tr style={{ textAlign: 'left', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
-                      <th style={{ padding: '8px' }}>Date</th><th style={{ padding: '8px' }}>Merchant</th><th style={{ padding: '8px' }}>Category</th>
-                      <th style={{ padding: '8px' }}>Type</th><th style={{ padding: '8px', textAlign: 'right' }}>Amount</th>
+                    <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--line-hair)' }}>
+                      <th className="cc-section-eyebrow" style={{ padding: '0 8px 8px' }}>Date</th>
+                      <th className="cc-section-eyebrow" style={{ padding: '0 8px 8px' }}>Merchant</th>
+                      <th className="cc-section-eyebrow" style={{ padding: '0 8px 8px' }}>Category</th>
+                      <th className="cc-section-eyebrow" style={{ padding: '0 8px 8px' }}>Type</th>
+                      <th className="cc-section-eyebrow" style={{ padding: '0 8px 8px', textAlign: 'right' }}>Amount</th>
                     </tr>
                   </thead>
                   <tbody>
                     {previewDoc.transactions.map(t => (
-                      <tr key={t.transaction_id} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{new Date(t.transaction_date).toLocaleDateString()}</td>
-                        <td style={{ padding: '8px', color: 'var(--text)' }}>{t.merchant || '—'}</td>
-                        <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{t.category || '—'}</td>
-                        <td style={{ padding: '8px', color: t.transaction_type === 'credit' ? '#34d399' : '#f87171' }}>{t.transaction_type}</td>
-                        <td style={{ padding: '8px', textAlign: 'right', color: 'var(--text)', fontWeight: '600' }}>₹{Number(t.amount).toLocaleString('en-IN')}</td>
+                      <tr key={t.transaction_id} style={{ borderBottom: '1px solid var(--line-hair)' }}>
+                        <td className="text-data" style={{ padding: '8px' }}>{new Date(t.transaction_date).toLocaleDateString()}</td>
+                        <td style={{ padding: '8px', color: 'var(--cc-text-primary)' }}>{t.merchant || '—'}</td>
+                        <td style={{ padding: '8px', color: 'var(--cc-text-tertiary)' }}>{t.category || '—'}</td>
+                        <td style={{ padding: '8px', color: t.transaction_type === 'credit' ? 'var(--state-verified)' : 'var(--sev-critical)' }}>{t.transaction_type}</td>
+                        <td className="cc-numeric" style={{ padding: '8px', textAlign: 'right', color: 'var(--cc-text-primary)', fontWeight: 600 }}>₹{Number(t.amount).toLocaleString('en-IN')}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             ) : previewDoc.chunks.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {previewDoc.chunks.map(c => (
-                  <div key={c.chunk_id} style={{ padding: '10px', background: 'rgba(0,0,0,0.15)', borderRadius: '6px', fontSize: '12px', color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }}>
-                    {c.section && <div style={{ color: 'var(--text)', fontWeight: '700', marginBottom: '4px' }}>{c.section}{c.page_number ? ` (p.${c.page_number})` : ''}</div>}
+                  <div key={c.chunk_id} style={{ paddingBottom: '10px', borderBottom: '1px solid var(--line-hair)', fontSize: '12px', color: 'var(--cc-text-tertiary)', whiteSpace: 'pre-wrap' }}>
+                    {c.section && <div style={{ color: 'var(--cc-text-primary)', fontWeight: 700, marginBottom: '4px' }}>{c.section}{c.page_number ? ` (p.${c.page_number})` : ''}</div>}
                     {c.content}
                   </div>
                 ))}
               </div>
             ) : (
-              <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No indexed content available for this document.</div>
+              <p style={{ fontSize: '13px', color: 'var(--cc-text-tertiary)' }}>No indexed content available for this document.</p>
             )}
           </div>
         </div>
       )}
 
-      {/* INVESTIGATE — chat-style conversation */}
-      <div className="card" style={{ padding: '24px' }}>
-        <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text)', marginBottom: '10px' }}>Investigate</div>
+      {/* INVESTIGATION SURFACE — the centerpiece. Not chat bubbles: each turn
+          shows the question as a small caption, then the answer as the real
+          content (lede + labeled evidence sections), matching the brief's
+          "question -> investigation result -> evidence -> action" hierarchy. */}
+      <section>
+        <p className="cc-section-eyebrow" style={{ marginBottom: '4px' }}>Investigate</p>
+        <h2 className="text-card-title" style={{ margin: '0 0 16px' }}>Ask a question</h2>
 
         {conversation.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '28px', marginBottom: '28px' }}>
             {conversation.map(turn => (
-              <div key={turn.id} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {/* USER MESSAGE */}
-                <div style={{ alignSelf: 'flex-end', maxWidth: '80%' }}>
-                  <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px', textAlign: 'right' }}>You</div>
-                  <div style={{ padding: '10px 16px', background: 'rgba(99, 102, 241, 0.12)', border: '1px solid rgba(99, 102, 241, 0.3)', borderRadius: '10px', color: 'var(--text)', fontSize: '14px' }}>
-                    {turn.question}
-                  </div>
+              <div key={turn.id}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '10px' }}>
+                  <p className="cc-section-eyebrow" style={{ margin: 0 }}>Question</p>
+                  <span style={{ fontSize: '13px', color: 'var(--cc-text-secondary)' }}>{turn.question}</span>
                 </div>
-
-                {/* ASSISTANT MESSAGE */}
-                <div style={{
-                  alignSelf: 'flex-start', width: '100%',
-                  border: '1px solid var(--border)',
-                  borderRadius: '10px', padding: '18px', background: 'rgba(0,0,0,0.12)'
-                }}>
-                  <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '10px' }}>
-                    MoneyOps AI
-                  </div>
-                  {turn.status === 'loading' && <LoadingBubble />}
+                <div style={{ borderTop: '1px solid var(--line-hair)', paddingTop: '16px' }}>
+                  {turn.status === 'loading' && <AnswerLoading />}
                   {turn.status === 'error' && (
-                    <div style={{ color: '#f87171', fontSize: '13px' }}><strong>Copilot Notice:</strong> {turn.error}</div>
+                    <p style={{ color: 'var(--sev-critical)', fontSize: '13px', margin: 0 }}><strong>Copilot notice:</strong> {turn.error}</p>
                   )}
                   {turn.status === 'done' && turn.report && (
-                    <AnswerBody report={turn.report} incidents={incidents} onSelectIncident={onSelectIncident} onViewTransactions={handleViewTransactions} />
+                    <motion.div
+                      initial={prefersReducedMotion ? false : { opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                    >
+                      <AnswerBody report={turn.report} incidents={incidents} onSelectIncident={onSelectIncident} onViewTransactions={handleViewTransactions} />
+                    </motion.div>
                   )}
                 </div>
               </div>
@@ -589,122 +583,118 @@ export default function FinancialCopilotView({ incidents, onSelectIncident }) {
             onKeyDown={e => { if (e.key === 'Enter') handleAsk(); }}
             placeholder="Ask about your financial data…"
             disabled={asking}
-            style={{ flex: 1, minWidth: '260px', padding: '14px 16px', borderRadius: '8px', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: '14px' }}
+            style={{ flex: 1, minWidth: '260px', padding: '13px 16px', borderRadius: 'var(--r-md)', background: 'var(--ink-raised)', border: '1px solid var(--line-solid)', color: 'var(--cc-text-primary)', fontSize: '14px' }}
           />
-          <button className="btn btn-primary" onClick={() => handleAsk()} disabled={asking || !query.trim()} style={{ padding: '12px 24px', fontWeight: '700', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {asking && <span className="spinner"></span>}
-            {asking ? 'Investigating…' : 'Ask'}
-          </button>
+          <Button tier="primary" onClick={() => handleAsk()} disabled={!query.trim()} state={asking ? 'loading' : 'idle'} loadingLabel="Investigating">
+            Ask
+          </Button>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
           {SUGGESTED_QUESTIONS.map(q => (
-            <button key={q} onClick={() => handleAsk(q)} disabled={asking}
-              style={{ padding: '6px 12px', borderRadius: '14px', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.3)', color: 'var(--primary)', fontSize: '11px', cursor: asking ? 'default' : 'pointer', opacity: asking ? 0.5 : 1 }}>
-              {q}
-            </button>
+            <Chip key={q} interactive onClick={() => !asking && handleAsk(q)} tone="accent">{q}</Chip>
           ))}
         </div>
-      </div>
+      </section>
 
       {/* TRANSACTION TABLE (toggled via View Transactions) */}
       {showTransactions && (
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text)' }}>Transactions ({transactionList.length})</div>
-            <button onClick={() => setShowTransactions(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '12px' }}>✕ Close</button>
+        <section>
+          <div className="cc-section-header">
+            <h2 className="text-card-title">Transactions ({transactionList.length})</h2>
+            <button onClick={() => setShowTransactions(false)} data-cursor="hover" style={{ background: 'none', border: 'none', color: 'var(--cc-text-tertiary)', cursor: 'pointer', fontSize: '12px' }}>Close</button>
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
               <thead>
-                <tr style={{ textAlign: 'left', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
-                  <th style={{ padding: '8px' }}>Date</th>
-                  <th style={{ padding: '8px' }}>Merchant</th>
-                  <th style={{ padding: '8px' }}>Category</th>
-                  <th style={{ padding: '8px' }}>Type</th>
-                  <th style={{ padding: '8px', textAlign: 'right' }}>Amount</th>
+                <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--line-hair)' }}>
+                  <th className="cc-section-eyebrow" style={{ padding: '0 8px 8px' }}>Date</th>
+                  <th className="cc-section-eyebrow" style={{ padding: '0 8px 8px' }}>Merchant</th>
+                  <th className="cc-section-eyebrow" style={{ padding: '0 8px 8px' }}>Category</th>
+                  <th className="cc-section-eyebrow" style={{ padding: '0 8px 8px' }}>Type</th>
+                  <th className="cc-section-eyebrow" style={{ padding: '0 8px 8px', textAlign: 'right' }}>Amount</th>
                 </tr>
               </thead>
               <tbody>
                 {transactionList.map(t => (
-                  <tr key={t.transaction_id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{new Date(t.transaction_date).toLocaleDateString()}</td>
-                    <td style={{ padding: '8px', color: 'var(--text)' }}>{t.merchant || '—'}</td>
-                    <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{t.category || '—'}</td>
-                    <td style={{ padding: '8px', color: t.transaction_type === 'credit' ? '#34d399' : '#f87171' }}>{t.transaction_type}</td>
-                    <td style={{ padding: '8px', textAlign: 'right', color: 'var(--text)', fontWeight: '600' }}>₹{Number(t.amount).toLocaleString('en-IN')}</td>
+                  <tr key={t.transaction_id} style={{ borderBottom: '1px solid var(--line-hair)' }}>
+                    <td className="text-data" style={{ padding: '8px' }}>{new Date(t.transaction_date).toLocaleDateString()}</td>
+                    <td style={{ padding: '8px', color: 'var(--cc-text-primary)' }}>{t.merchant || '—'}</td>
+                    <td style={{ padding: '8px', color: 'var(--cc-text-tertiary)' }}>{t.category || '—'}</td>
+                    <td style={{ padding: '8px', color: t.transaction_type === 'credit' ? 'var(--state-verified)' : 'var(--sev-critical)' }}>{t.transaction_type}</td>
+                    <td className="cc-numeric" style={{ padding: '8px', textAlign: 'right', color: 'var(--cc-text-primary)', fontWeight: 600 }}>₹{Number(t.amount).toLocaleString('en-IN')}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
       )}
 
       {/* RUN HISTORY — expandable/collapsible preview only. Expanding a row
           NEVER touches the active conversation above and NEVER calls Gemini;
           it only reads the already-stored financial_analysis_runs record. */}
       {runs.length > 0 && (
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text)', marginBottom: '10px' }}>Recent Investigations</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <section>
+          <p className="cc-section-eyebrow" style={{ marginBottom: '4px' }}>History</p>
+          <h2 className="text-card-title" style={{ margin: '0 0 12px' }}>Recent investigations</h2>
+          <div className="cc-row-list">
             {runs.map(r => {
               const isExpanded = expandedHistoryIds.has(r.run_id);
               const detail = historyDetailCache[r.run_id];
               const isLoadingDetail = historyLoadingId === r.run_id;
               return (
-                <div key={r.run_id} style={{
-                  border: isExpanded ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid transparent',
-                  borderRadius: '6px', overflow: 'hidden',
-                  background: isExpanded ? 'rgba(99, 102, 241, 0.06)' : 'transparent'
-                }}>
+                <div key={r.run_id}>
                   <button
                     onClick={() => toggleHistory(r)}
                     aria-expanded={isExpanded}
-                    style={{
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', fontSize: '12px', padding: '8px 10px',
-                      background: isExpanded ? 'transparent' : 'rgba(255,255,255,0.02)',
-                      border: 'none', borderRadius: '4px', flexWrap: 'wrap', cursor: 'pointer', textAlign: 'left', width: '100%'
-                    }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text)', flex: 1, minWidth: 0 }}>
-                      <span style={{ color: 'var(--text-muted)', fontSize: '10px', flexShrink: 0 }}>{isExpanded ? '▾' : '▸'}</span>
-                      <span>{r.query}</span>
+                    data-cursor="hover"
+                    className="cc-row"
+                    style={{ border: 'none', borderBottom: '1px solid var(--line-hair)', background: 'none', width: '100%', cursor: 'pointer' }}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--cc-text-primary)', flex: 1, minWidth: 0, fontSize: '13px' }}>
+                      {isExpanded ? <ChevronUp size={12} style={{ color: 'var(--cc-text-tertiary)', flexShrink: 0 }} /> : <ChevronDown size={12} style={{ color: 'var(--cc-text-tertiary)', flexShrink: 0 }} />}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.query}</span>
                     </span>
-                    <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace', flexShrink: 0 }}>{new Date(r.created_at).toLocaleString()}</span>
+                    <span className="cc-row-meta">{new Date(r.created_at).toLocaleString()}</span>
                   </button>
 
-                  {isExpanded && (
-                    <div style={{ padding: '4px 14px 14px 26px', borderTop: '1px solid rgba(99, 102, 241, 0.2)' }}>
-                      <div style={{ fontSize: '10px', fontWeight: '700', color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '10px 0' }}>
-                        From History
-                      </div>
-                      {isLoadingDetail && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '12px' }}>
-                          <span className="spinner"></span>
-                          <span>Loading stored answer…</span>
+                  <AnimatePresence initial={false}>
+                    {isExpanded && (
+                      <motion.div
+                        initial={prefersReducedMotion ? false : { height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={prefersReducedMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                        style={{ overflow: 'hidden' }}
+                      >
+                        <div style={{ padding: '16px 0 20px 20px' }}>
+                          {isLoadingDetail && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--cc-text-tertiary)', fontSize: '12px' }}>
+                              <span className="spinner"></span>
+                              <span>Loading stored answer…</span>
+                            </div>
+                          )}
+                          {!isLoadingDetail && detail && detail.isError && (
+                            <p style={{ color: 'var(--sev-critical)', fontSize: '12px' }}><strong>Copilot notice:</strong> {detail.error}</p>
+                          )}
+                          {!isLoadingDetail && detail && !detail.isError && detail.report && (
+                            <>
+                              <AnswerBody report={detail.report} incidents={incidents} onSelectIncident={onSelectIncident} onViewTransactions={handleViewTransactions} />
+                              <Button tier="ghost" onClick={() => handleContinueInvestigation(r.run_id)} className="cc-mt-14">
+                                <RotateCcw size={12} strokeWidth={2} style={{ marginRight: 6 }} />
+                                Continue this investigation
+                              </Button>
+                            </>
+                          )}
                         </div>
-                      )}
-                      {!isLoadingDetail && detail && detail.isError && (
-                        <div style={{ color: '#f87171', fontSize: '12px' }}><strong>Copilot Notice:</strong> {detail.error}</div>
-                      )}
-                      {!isLoadingDetail && detail && !detail.isError && detail.report && (
-                        <>
-                          <div style={{ fontSize: '13px' }}>
-                            <AnswerBody report={detail.report} incidents={incidents} onSelectIncident={onSelectIncident} onViewTransactions={handleViewTransactions} />
-                          </div>
-                          <button
-                            onClick={() => handleContinueInvestigation(r.run_id)}
-                            style={{ marginTop: '14px', background: 'rgba(99, 102, 241, 0.12)', border: '1px solid rgba(99, 102, 241, 0.35)', color: 'var(--primary)', fontSize: '12px', fontWeight: '700', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer' }}>
-                            ↻ Continue this investigation
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               );
             })}
           </div>
-        </div>
+        </section>
       )}
     </div>
   );

@@ -1,6 +1,74 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { animate } from 'framer-motion';
+import { Info, AlertTriangle, RefreshCw, CheckCircle2, ChevronRight } from 'lucide-react';
+import { Card, Metric, Button } from '../primitives';
+import { usePrefersReducedMotion } from '../hooks/useMotionGuards';
+
+// Derives the SeverityRail's confidence fill from real evidence already
+// shown elsewhere on the card (the anomaly ratio vs. baseline, or a
+// concentration percentage) — never a fabricated number, never presented as
+// an API field. An incident with no evidence recorded yet gets 0%, same
+// "explicit empty state, not a fake value" rule the rest of this component
+// already follows.
+function deriveConfidence(inc) {
+  const ev = inc.evidence || {};
+  if (ev.failure_rate_ratio != null) return Math.min(100, Math.round(ev.failure_rate_ratio * 33));
+  if (ev.refund_rate_ratio != null) return Math.min(100, Math.round(ev.refund_rate_ratio * 33));
+  if (ev.duplicate_refund_payments != null && ev.total_refunds) {
+    return Math.min(100, Math.round((ev.duplicate_refund_payments / ev.total_refunds) * 100));
+  }
+  if (ev.webhook_failure_rate_pct != null) return Math.min(100, Math.round(ev.webhook_failure_rate_pct));
+  return 0;
+}
+
+const SEVERITY_LABEL_COLOR = {
+  critical: 'var(--sev-critical)',
+  high: 'var(--sev-high)',
+  medium: 'var(--sev-medium)',
+  low: 'var(--sev-low)',
+};
+
+// Animates the hero exposure figure from its previous displayed value to
+// the new one whenever real data changes (initial load included) — never a
+// fabricated number, just an eased transition to the same real value this
+// page already computes. Skipped entirely under prefers-reduced-motion,
+// per the sitewide motion rule.
+function useCountUp(target, prefersReducedMotion) {
+  const [display, setDisplay] = useState(target);
+  const prevTarget = useRef(target);
+
+  useEffect(() => {
+    if (prefersReducedMotion) {
+      setDisplay(target);
+      prevTarget.current = target;
+      return undefined;
+    }
+    const controls = animate(prevTarget.current, target, {
+      duration: 0.9,
+      ease: [0.22, 1, 0.36, 1],
+      onUpdate: (v) => setDisplay(v),
+    });
+    prevTarget.current = target;
+    return () => controls.stop();
+  }, [target, prefersReducedMotion]);
+
+  return display;
+}
+
+const relativeTime = (isoStr) => {
+  if (!isoStr) return null;
+  const diffMs = Date.now() - new Date(isoStr).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+};
 
 export default function OverviewView({ stats, sourceStats, incidents, onSelectIncident, onTriggerDetection, isDetecting }) {
+  const prefersReducedMotion = usePrefersReducedMotion();
+
   // Pending-investigation incidents surface first — a reviewer scanning this list
   // should see what still needs attention before what's already been handled,
   // rather than whatever was most recently re-confirmed by a detection re-run.
@@ -23,159 +91,95 @@ export default function OverviewView({ stats, sourceStats, incidents, onSelectIn
   const totalExposure = activeIncidents.reduce((sum, inc) => sum + (inc.potential_exposure || 0), 0);
   const totalFailed = activeIncidents.reduce((sum, inc) => sum + (inc.evidence?.failed_payments_count || inc.affected_payments || 0), 0);
   const detectionVolume = sourceStats?.detection_volume || null;
-  const pendingCount = activeIncidents.filter(inc => inc.investigation_status !== 'investigated').length;
 
   const mostRecentDetectedAt = incidents.length > 0
     ? incidents.reduce((latest, inc) => new Date(inc.detected_at) > new Date(latest) ? inc.detected_at : latest, incidents[0].detected_at)
     : null;
 
-  const relativeTime = (isoStr) => {
-    if (!isoStr) return null;
-    const diffMs = Date.now() - new Date(isoStr).getTime();
-    const mins = Math.floor(diffMs / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins} min ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    return `${Math.floor(hrs / 24)}d ago`;
-  };
+  const animatedExposure = useCountUp(totalExposure, prefersReducedMotion);
 
   return (
-    <div className="view-container" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div className="cc-page">
 
-      {/* Operational pulse — real, derived-from-data signals only (no fabricated
-          "last batch"/"last scan" timers not actually backed by fetched state). */}
-      <div style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '14px' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title="Real = live Razorpay Test Mode API data. Incident Lab = labeled synthetic scenarios used for anomaly-detection evaluation. Never blended into one number.">
-          <span style={{ opacity: 0.7 }}>ⓘ</span>
-          <span>Combines live Razorpay Test Mode data and Incident Lab simulation data — see the Data tab for the per-source breakdown.</span>
-        </span>
-        {mostRecentDetectedAt && (
-          <span>• Most recent incident detected <strong style={{ color: 'var(--text)' }}>{relativeTime(mostRecentDetectedAt)}</strong></span>
+      {/* PAGE CONTEXT */}
+      <div className="cc-page-header">
+        <h1 className="text-page-title">Overview</h1>
+        <p className="cc-page-desc">What's happening right now, across every connected banking node and merchant channel.</p>
+      </div>
+
+      {/* SYSTEM STATE — one quiet strip, not two stacked notices. Instrument
+          chrome (what data this is, whether it's trustworthy), not a
+          marketing alert. */}
+      <div className="cc-system-strip">
+        <Info size={13} strokeWidth={2} className="cc-icon" />
+        <span>Live Razorpay Test Mode + Incident Lab simulation data.</span>
+        {detectionVolume && !detectionVolume.razorpay_test_sufficient_for_detection && (
+          <>
+            <span className="cc-system-strip-sep">·</span>
+            <AlertTriangle size={13} strokeWidth={2} className="cc-icon" style={{ color: 'var(--sev-medium)' }} />
+            <span style={{ color: 'var(--sev-medium)' }}>
+              {detectionVolume.razorpay_test_payment_count} real payment attempt{detectionVolume.razorpay_test_payment_count === 1 ? '' : 's'} — below the {detectionVolume.min_sample_size}+ threshold for reliable detection.
+            </span>
+          </>
         )}
-        <span>• <strong style={{ color: activeIncidents.length > 0 ? '#f87171' : 'var(--text)' }}>{activeIncidents.length}</strong> active</span>
-        {pendingCount > 0 && <span>• <strong style={{ color: '#facc15' }}>{pendingCount}</strong> pending investigation</span>}
-        {resolvedIncidents.length > 0 && <span>• <strong style={{ color: '#34d399' }}>{resolvedIncidents.length}</strong> resolved historically</span>}
+        {mostRecentDetectedAt && (
+          <>
+            <span className="cc-system-strip-sep">·</span>
+            <span>Last incident detected {relativeTime(mostRecentDetectedAt)}</span>
+          </>
+        )}
       </div>
 
-      {detectionVolume && !detectionVolume.razorpay_test_sufficient_for_detection && (
-        <div style={{ fontSize: '12px', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ opacity: 0.8 }}>⚠</span>
-          <span>Razorpay Test Mode: {detectionVolume.razorpay_test_payment_count} payment attempt{detectionVolume.razorpay_test_payment_count === 1 ? '' : 's'} — insufficient volume for reliable anomaly detection (needs {detectionVolume.min_sample_size}+). No incidents are raised from real data below that floor.</span>
+      {/* HERO — one dominant number. Everything else on this page is
+          context for this figure, not a peer to it. */}
+      <div className="cc-hero">
+        <p className="cc-hero-label">Potential exposure</p>
+        <div className="cc-hero-value text-hero cc-numeric">
+          ₹{animatedExposure.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </div>
-      )}
-
-      {/* 1. TOP 4 CORE OPERATIONAL METRICS */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-        
-        {/* Card 1: Transactions */}
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Transactions
-          </div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text)', marginTop: '8px' }}>
-            {(stats?.payments || 0).toLocaleString('en-IN')}
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Across connected datasets in PostgreSQL
-          </div>
+        <div className="cc-hero-context">
+          <span className="cc-hero-active" style={{ color: activeIncidents.length > 0 ? 'var(--sev-critical)' : 'var(--state-verified)' }}>
+            {activeIncidents.length} active incident{activeIncidents.length === 1 ? '' : 's'}
+          </span>
+          <span className="cc-hero-quiet">
+            {(stats?.payments || 0).toLocaleString('en-IN')} transactions logged · {activeIncidents.length > 0 ? totalFailed.toLocaleString('en-IN') : 0} failed payments flagged
+          </span>
         </div>
-
-
-        {/* Card 2: Failed Payments */}
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Failed Payments
-          </div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: activeIncidents.length > 0 ? '#f87171' : 'var(--text)', marginTop: '8px' }}>
-            {activeIncidents.length > 0 ? totalFailed.toLocaleString('en-IN') : 0}
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {activeIncidents.length > 0 ? 'Anomalous failure volume' : 'Within normal operational baselines'}
-          </div>
-        </div>
-
-        {/* Card 3: Active Incidents */}
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Active Incidents
-          </div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: activeIncidents.length > 0 ? '#f87171' : '#10b981', marginTop: '8px' }}>
-            {activeIncidents.length}
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {activeIncidents.length > 0 ? 'Discovered by IsolationForest' : 'All systems operating normally'}
-            {resolvedIncidents.length > 0 && ` · ${resolvedIncidents.length} resolved (historical)`}
-          </div>
-        </div>
-
-        {/* Card 4: Potential Exposure */}
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Potential Exposure
-          </div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: totalExposure > 0 ? '#f87171' : 'var(--text)', marginTop: '8px' }}>
-            ₹{totalExposure.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Unresolved transaction value
-          </div>
-        </div>
-
       </div>
 
-      {/* 2. ACTIVE INCIDENTS SECTION */}
-      <div className="card" style={{ padding: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
-          <div>
-            <h2 style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)', margin: 0 }}>
-              Active Incidents
-            </h2>
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-              Incidents discovered via dynamic feature extraction and IsolationForest anomaly detection.
-            </p>
-          </div>
-
-          <button 
-            className="btn"
+      {/* ACTIVE INCIDENTS — the centerpiece. Each entry is a case to enter,
+          not a dashboard card with a repeated CTA: the whole row is the
+          click target (Card's onClick), a chevron appears on hover as the
+          only interaction affordance, and severity is carried by the rail
+          plus a plain colored text label — never a bordered pill. */}
+      <section>
+        <div className="cc-section-header">
+          <h2 className="text-card-title">Active</h2>
+          <Button
+            tier="secondary"
             onClick={onTriggerDetection}
-            disabled={isDetecting}
-            style={{ 
-              background: 'rgba(99, 102, 241, 0.15)', 
-              borderColor: 'rgba(99, 102, 241, 0.4)', 
-              color: 'var(--primary)',
-              padding: '8px 16px',
-              fontSize: '12px',
-              fontWeight: '600'
-            }}
+            state={isDetecting ? 'loading' : 'idle'}
+            loadingLabel="Scanning"
           >
-            {isDetecting ? '↻ Scanning PostgreSQL ML...' : '↻ Run Anomaly Scan'}
-          </button>
+            <RefreshCw size={13} strokeWidth={2} style={{ marginRight: 6 }} />
+            Run anomaly scan
+          </Button>
         </div>
 
-        {/* Incident List / Clean Empty State */}
         {activeIncidents.length === 0 ? (
-          <div style={{ 
-            padding: '48px 24px', 
-            textAlign: 'center', 
-            background: 'rgba(255, 255, 255, 0.02)', 
-            border: '1px dashed var(--border)', 
-            borderRadius: '8px',
-            color: 'var(--text-muted)'
-          }}>
-            <div style={{ fontSize: '24px', marginBottom: '8px' }}>✓</div>
-            <div style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text)' }}>
-              No active incidents
-            </div>
+          <div style={{ padding: '40px 0', color: 'var(--cc-text-tertiary)' }}>
+            <CheckCircle2 size={20} strokeWidth={1.5} style={{ color: 'var(--state-verified)', marginBottom: 10 }} />
+            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--cc-text-primary)' }}>No active incidents</div>
             <div style={{ fontSize: '13px', marginTop: '4px' }}>
               MoneyOps is not currently detecting abnormal payment behavior across any banking node or merchant channel.
             </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {activeIncidents.map((inc) => {
               const ev = inc.evidence || {};
               const exposureStr = `₹${(inc.potential_exposure || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+              const severity = inc.severity || 'critical';
 
               // Each anomaly family carries a genuinely different evidence shape
               // (a duplicate-refund incident has no "failure rate" at all — it
@@ -189,182 +193,118 @@ export default function OverviewView({ stats, sourceStats, incidents, onSelectIn
                 const totalRefunds = ev.total_refunds ?? null;
                 const concentrationPct = totalRefunds ? ((dup / totalRefunds) * 100).toFixed(2) : null;
                 cardMetrics = [
-                  { label: 'DUPLICATE REFUNDS', value: totalRefunds != null ? `${dup} / ${totalRefunds}` : String(dup) },
-                  { label: 'CONCENTRATION', value: concentrationPct != null ? `${concentrationPct}%` : '—', empty: concentrationPct == null },
-                  { label: 'REFUND / EVENT COUNT', value: totalRefunds != null ? totalRefunds : '—', empty: totalRefunds == null },
-                  { label: 'POTENTIAL EXPOSURE', value: exposureStr }
+                  { label: 'Duplicate refunds', value: totalRefunds != null ? `${dup} / ${totalRefunds}` : String(dup) },
+                  { label: 'Concentration', value: concentrationPct != null ? `${concentrationPct}%` : '—', empty: concentrationPct == null },
+                  { label: 'Refund / event count', value: totalRefunds != null ? totalRefunds : '—', empty: totalRefunds == null },
+                  { label: 'Potential exposure', value: exposureStr }
                 ];
               } else if (ev.failure_rate_pct != null) {
                 cardMetrics = [
-                  { label: 'FAILURE RATE', value: `${ev.failure_rate_pct}%`, sub: `${ev.failure_rate_ratio ?? '1.0'}x baseline` },
-                  { label: 'PEER BASELINE', value: `${ev.peer_failure_rate_pct ?? 0}%` },
-                  { label: 'AFFECTED PAYMENTS', value: ev.failed_payments_count ?? inc.affected_payments ?? '—' },
-                  { label: 'POTENTIAL EXPOSURE', value: exposureStr }
+                  { label: 'Failure rate', value: `${ev.failure_rate_pct}%`, sub: `${ev.failure_rate_ratio ?? '1.0'}x baseline` },
+                  { label: 'Peer baseline', value: `${ev.peer_failure_rate_pct ?? 0}%` },
+                  { label: 'Affected payments', value: ev.failed_payments_count ?? inc.affected_payments ?? '—' },
+                  { label: 'Potential exposure', value: exposureStr }
                 ];
               } else if (ev.actual_refund_rate_pct != null) {
                 cardMetrics = [
-                  { label: 'REFUND RATE', value: `${ev.actual_refund_rate_pct}%`, sub: `${ev.refund_rate_ratio ?? '1.0'}x baseline` },
-                  { label: "MERCHANT'S BASELINE", value: `${ev.baseline_refund_rate_pct ?? 0}%` },
-                  { label: 'REFUNDS / EVENTS', value: ev.total_refunds ?? '—' },
-                  { label: 'POTENTIAL EXPOSURE', value: exposureStr }
+                  { label: 'Refund rate', value: `${ev.actual_refund_rate_pct}%`, sub: `${ev.refund_rate_ratio ?? '1.0'}x baseline` },
+                  { label: "Merchant's baseline", value: `${ev.baseline_refund_rate_pct ?? 0}%` },
+                  { label: 'Refunds / events', value: ev.total_refunds ?? '—' },
+                  { label: 'Potential exposure', value: exposureStr }
                 ];
               } else if (ev.webhook_failure_rate_pct != null) {
                 cardMetrics = [
-                  { label: 'WEBHOOK FAILURE RATE', value: `${ev.webhook_failure_rate_pct}%` },
-                  { label: 'PEER BASELINE', value: `${ev.peer_failure_rate_pct ?? 0}%` },
-                  { label: 'FAILED DELIVERIES', value: ev.webhook_failed ?? '—' },
-                  { label: 'POTENTIAL EXPOSURE', value: exposureStr }
+                  { label: 'Webhook failure rate', value: `${ev.webhook_failure_rate_pct}%` },
+                  { label: 'Peer baseline', value: `${ev.peer_failure_rate_pct ?? 0}%` },
+                  { label: 'Failed deliveries', value: ev.webhook_failed ?? '—' },
+                  { label: 'Potential exposure', value: exposureStr }
                 ];
               } else {
-                // No evidence recorded yet for this incident's anomaly type —
-                // an explicit empty state, never a fabricated zero.
                 cardMetrics = [
-                  { label: 'PRIMARY METRIC', value: '—', empty: true },
-                  { label: 'BASELINE', value: '—', empty: true },
-                  { label: 'AFFECTED PAYMENTS', value: inc.affected_payments ?? '—' },
-                  { label: 'POTENTIAL EXPOSURE', value: exposureStr }
+                  { label: 'Primary metric', value: '—', empty: true },
+                  { label: 'Baseline', value: '—', empty: true },
+                  { label: 'Affected payments', value: inc.affected_payments ?? '—' },
+                  { label: 'Potential exposure', value: exposureStr }
                 ];
               }
 
-              const invPill = {
-                not_investigated: { label: 'PENDING INVESTIGATION', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.12)' },
-                investigating: { label: 'INVESTIGATING', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.12)' },
-                investigated: { label: 'INVESTIGATED', color: '#34d399', bg: 'rgba(52, 211, 153, 0.12)' },
-                investigation_failed: { label: 'INVESTIGATION FAILED', color: '#f87171', bg: 'rgba(248, 113, 113, 0.12)' }
-              }[inc.investigation_status || 'not_investigated'];
-
               return (
-                <div 
+                <Card
                   key={inc.incident_id}
-                  style={{
-                    padding: '20px 24px',
-                    background: 'rgba(239, 68, 68, 0.02)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    borderRadius: '10px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '14px',
-                    transition: 'all 0.2s ease'
-                  }}
+                  severity={severity}
+                  confidence={deriveConfidence(inc)}
+                  onClick={() => onSelectIncident(inc)}
+                  title="Open this incident's investigation"
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                        <span className={`badge badge-${inc.severity || 'critical'}`} style={{ fontSize: '11px', fontWeight: '700' }}>
-                          {inc.severity?.toUpperCase() || 'CRITICAL'}
+                  <div className="cc-incident-head">
+                    <div style={{ minWidth: 0 }}>
+                      <div className="cc-incident-eyebrow">
+                        <span style={{ color: SEVERITY_LABEL_COLOR[severity] || SEVERITY_LABEL_COLOR.critical, fontWeight: 700 }}>
+                          {severity.toUpperCase()}
                         </span>
-                        <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', background: invPill.bg, color: invPill.color, fontWeight: '700' }}>
-                          {invPill.label}
-                        </span>
-                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-                          {inc.incident_id}
-                        </span>
-                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>•</span>
-                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                          Detected: {new Date(inc.detected_at).toLocaleString()}
-                        </span>
+                        <span className="cc-system-strip-sep">·</span>
+                        <span className="text-data">{inc.incident_id}</span>
+                        <span className="cc-system-strip-sep">·</span>
+                        <span className="text-data">{relativeTime(inc.detected_at)}</span>
+                        {inc.investigation_status === 'investigated' && (
+                          <>
+                            <span className="cc-system-strip-sep">·</span>
+                            <span className="text-data" style={{ color: 'var(--state-verified)' }}>Investigated</span>
+                          </>
+                        )}
                       </div>
-                      <h3 style={{ fontSize: '17px', fontWeight: '700', color: 'var(--text)', margin: 0 }}>
-                        {inc.title}
-                      </h3>
+                      <h3 className="text-card-title" style={{ margin: '4px 0 0' }}>{inc.title}</h3>
                     </div>
-
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => onSelectIncident(inc)}
-                      title="Opens the Investigation tab to review this incident. Does not itself run the Gemini investigation — that's a separate, deliberate action on that page."
-                      style={{
-                        padding: '10px 20px',
-                        fontWeight: '700',
-                        fontSize: '13px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px'
-                      }}
-                    >
-                      🔍 Review
-                    </button>
+                    <ChevronRight size={18} strokeWidth={2} className="cc-incident-chevron" />
                   </div>
 
-                  {/* Metrics Row */}
-                  <div style={{ 
-                    display: 'grid', 
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', 
-                    gap: '12px', 
-                    padding: '12px 16px', 
-                    background: 'rgba(0, 0, 0, 0.2)', 
-                    borderRadius: '6px',
-                    border: '1px solid var(--border)'
-                  }}>
+                  <div className="cc-incident-metrics">
                     {cardMetrics.map((m, mi) => (
-                      <div key={mi}>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{m.label}</div>
-                        <div style={{ fontSize: '16px', fontWeight: '700', color: m.empty ? 'var(--text-muted)' : (m.label === 'POTENTIAL EXPOSURE' || mi === 0 ? '#f87171' : 'var(--text)') }}>
-                          {m.value}
-                          {m.sub && <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'normal' }}> ({m.sub})</span>}
-                        </div>
-                        {m.empty && <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>No evidence recorded</div>}
-                      </div>
+                      <Metric
+                        key={mi}
+                        size={mi === 0 ? 'md' : 'sm'}
+                        className={mi === 0 ? '' : 'cc-metric-secondary'}
+                        label={m.label}
+                        value={m.value}
+                        tone={m.empty ? undefined : (mi === 0 ? 'critical' : undefined)}
+                        sub={m.sub ? m.sub : (m.empty ? 'No evidence recorded' : undefined)}
+                      />
                     ))}
                   </div>
 
-                  {/* Primary Signal */}
                   {inc.primary_signal && (
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-                      <strong style={{ color: 'var(--text)' }}>Signal:</strong> {inc.primary_signal}
-                    </div>
+                    <p className="cc-incident-signal">{inc.primary_signal}</p>
                   )}
-                </div>
+                </Card>
               );
             })}
           </div>
         )}
-      </div>
+      </section>
 
-      {/* 3. RESOLVED / HISTORICAL INCIDENTS (case-memory precedent, not active) */}
+      {/* HISTORY — quiet case memory, not a second incident section. */}
       {resolvedIncidents.length > 0 && (
-        <div className="card" style={{ padding: '24px' }}>
-          <h2 style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text-muted)', margin: 0 }}>
-            Resolved / Historical Incidents ({resolvedIncidents.length})
-          </h2>
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 16px 0' }}>
-            Previously handled incidents — executed simulations and human-rejected recommendations alike — kept as case-memory precedent for future investigations. Not counted as active.
+        <section>
+          <p className="cc-section-eyebrow" style={{ marginBottom: '10px' }}>
+            Case memory — {resolvedIncidents.length} resolved historically
           </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="cc-row-list">
             {resolvedIncidents.map((inc) => {
               const isRejected = inc.status === 'rejected';
               return (
-                <div
-                  key={inc.incident_id}
-                  style={{
-                    padding: '12px 16px',
-                    background: 'rgba(255, 255, 255, 0.02)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '8px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: '12px',
-                    flexWrap: 'wrap'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span className="badge" style={{
-                      fontSize: '10px', fontWeight: '700', padding: '2px 8px', borderRadius: '10px',
-                      color: isRejected ? '#94a3b8' : '#10b981',
-                      background: isRejected ? 'rgba(148, 163, 184, 0.12)' : 'rgba(16, 185, 129, 0.1)'
-                    }}>
-                      {isRejected ? 'REJECTED BY HUMAN' : 'RESOLVED'}
+                <div key={inc.incident_id} className="cc-row cc-row-quiet">
+                  <div className="cc-row-main">
+                    <span style={{ color: isRejected ? 'var(--cc-text-disabled)' : 'var(--state-verified)', fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
+                      {isRejected ? 'Rejected' : 'Resolved'}
                     </span>
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{inc.incident_id}</span>
-                    <span style={{ fontSize: '13px', color: 'var(--text)' }}>{inc.title}</span>
+                    <span className="cc-row-title" style={{ color: 'var(--cc-text-secondary)' }}>{inc.title}</span>
                   </div>
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{inc.source || 'incident_lab'}</span>
+                  <span className="cc-row-meta">{inc.incident_id}</span>
                 </div>
               );
             })}
           </div>
-        </div>
+        </section>
       )}
 
     </div>

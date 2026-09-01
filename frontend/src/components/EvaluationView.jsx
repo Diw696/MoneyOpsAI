@@ -329,7 +329,7 @@ export default function EvaluationView() {
             <tbody>
               {filteredRecords.map((r, idx) => (
                 <tr key={idx}>
-                  <td style={{ fontFamily: 'monospace', fontWeight: '600' }}>{r.scenario_id}</td>
+                  <td style={{ fontFamily: 'var(--font-mono)', fontWeight: '600' }}>{r.scenario_id}</td>
                   <td><strong>{r.entity_id}</strong></td>
                   <td style={{ color: 'var(--text-muted)' }}>{r.scenario_type}</td>
                   <td>
@@ -354,7 +354,7 @@ export default function EvaluationView() {
                       {r.classification}
                     </span>
                   </td>
-                  <td style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                  <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
                     {r.incident_id || '—'}
                   </td>
                 </tr>

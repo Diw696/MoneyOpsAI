@@ -1,7 +1,16 @@
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { RotateCcw, ChevronDown, ChevronUp, ShieldCheck } from 'lucide-react';
 import { fetchAuditLogs } from '../api';
+import { Button, Chip } from '../primitives';
+import { usePrefersReducedMotion } from '../hooks/useMotionGuards';
+
+const STATUS_TONE = { executed: 'verified', approved: 'accent', rejected: 'neutral', pending_approval: 'medium' };
+const STATUS_LABEL = { executed: 'Executed — simulation', approved: 'Approved by human', rejected: 'Rejected', pending_approval: 'Pending approval' };
+const RISK_TONE = { RED: 'critical', YELLOW: 'medium', GREEN: 'verified' };
 
 export default function AuditView() {
+  const prefersReducedMotion = usePrefersReducedMotion();
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expandedLogId, setExpandedLogId] = useState(null);
@@ -23,235 +32,129 @@ export default function AuditView() {
     loadLogs();
   }, []);
 
-  const formatStatusBadge = (status) => {
-    const s = (status || '').toLowerCase();
-    if (s === 'executed') {
-      return (
-        <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '800', background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.4)' }}>
-          EXECUTED — SIMULATION
-        </span>
-      );
-    }
-    if (s === 'approved') {
-      return (
-        <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '800', background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.4)' }}>
-          APPROVED BY HUMAN
-        </span>
-      );
-    }
-    if (s === 'rejected') {
-      return (
-        <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '800', background: 'rgba(100, 116, 139, 0.2)', color: '#94a3b8', border: '1px solid rgba(100, 116, 139, 0.4)' }}>
-          REJECTED
-        </span>
-      );
-    }
-    return (
-      <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '800', background: 'rgba(234, 179, 8, 0.2)', color: '#facc15', border: '1px solid rgba(234, 179, 8, 0.4)' }}>
-        PENDING APPROVAL
-      </span>
-    );
-  };
-
-  const formatRiskBadge = (tier) => {
-    const t = (tier || 'RED').toUpperCase();
-    if (t === 'RED') {
-      return (
-        <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.4)' }}>
-          RED • APPROVAL REQUIRED
-        </span>
-      );
-    }
-    if (t === 'YELLOW') {
-      return (
-        <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', background: 'rgba(234, 179, 8, 0.2)', color: '#facc15', border: '1px solid rgba(234, 179, 8, 0.4)' }}>
-          YELLOW
-        </span>
-      );
-    }
-    return (
-      <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.4)' }}>
-        GREEN
-      </span>
-    );
-  };
-
   return (
-    <div className="view-container" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      
-      {/* 1. TOP HEADER */}
-      <div className="card" style={{ padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-        <div>
-          <h2 style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)', margin: 0 }}>
-            Immutable Action Audit Trail
-          </h2>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-            Permanent forensic ledger of AI recommendations, human approvals, and safe simulations in PostgreSQL.
+    <div className="cc-page">
+
+      {/* PAGE CONTEXT */}
+      <div className="cc-page-header" style={{ maxWidth: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '16px' }}>
+        <div style={{ maxWidth: 640 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+            <ShieldCheck size={16} strokeWidth={2} style={{ color: 'var(--cc-accent)' }} />
+            <p className="cc-section-eyebrow" style={{ margin: 0 }}>Chain of custody</p>
+          </div>
+          <h1 className="text-page-title">Audit Log</h1>
+          <p className="cc-page-desc">
+            Permanent, forensic ledger of every AI recommendation, human approval, and safe simulation —
+            immutable in PostgreSQL.
           </p>
         </div>
-
-        <button 
-          className="btn"
-          onClick={loadLogs}
-          disabled={loading}
-          style={{ 
-            background: 'rgba(99, 102, 241, 0.15)', 
-            borderColor: 'rgba(99, 102, 241, 0.4)', 
-            color: 'var(--primary)',
-            padding: '8px 16px',
-            fontSize: '12px',
-            fontWeight: '600'
-          }}
-        >
-          {loading ? '↻ Loading Audit Log...' : '↻ Refresh Audit Trail'}
-        </button>
+        <Button tier="secondary" onClick={loadLogs} state={loading ? 'loading' : 'idle'} loadingLabel="Loading">
+          <RotateCcw size={13} strokeWidth={2} style={{ marginRight: 6 }} />
+          Refresh audit trail
+        </Button>
       </div>
 
-      {/* 2. AUDIT LOGS TABLE */}
-      <div className="card" style={{ padding: '24px' }}>
+      {/* AUDIT LEDGER */}
+      <section>
         {loading && logs.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-            <span className="spinner"></span> Loading audit records from PostgreSQL...
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--cc-text-tertiary)', fontSize: '13px' }}>
+            Loading audit records from PostgreSQL…
           </div>
         ) : logs.length === 0 ? (
-          <div style={{ 
-            padding: '48px 24px', 
-            textAlign: 'center', 
-            background: 'rgba(255, 255, 255, 0.02)', 
-            border: '1px dashed var(--border)', 
-            borderRadius: '8px',
-            color: 'var(--text-muted)'
-          }}>
-            <div style={{ fontSize: '24px', marginBottom: '8px' }}>📝</div>
-            <div style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text)' }}>
-              No audit records recorded yet
-            </div>
+          <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--cc-text-tertiary)' }}>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--cc-text-primary)' }}>No audit records recorded yet</div>
             <div style={{ fontSize: '13px', marginTop: '4px' }}>
               When governed actions are proposed, approved, rejected, or simulated, permanent audit rows appear here.
             </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div className="cc-row-list">
             {logs.map((log) => {
               const isExpanded = expandedLogId === log.audit_id;
               const hasExecResult = Boolean(log.execution_result);
+              const statusKey = log.new_status || log.approval_status || 'pending_approval';
+              const riskKey = (log.action_tier || 'RED').toUpperCase();
 
               return (
-                <div 
-                  key={log.audit_id}
-                  style={{
-                    border: '1px solid var(--border)',
-                    borderRadius: '8px',
-                    background: 'rgba(255, 255, 255, 0.02)',
-                    overflow: 'hidden',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  {/* Summary Bar */}
-                  <div 
+                <div key={log.audit_id}>
+                  <button
                     onClick={() => setExpandedLogId(isExpanded ? null : log.audit_id)}
-                    style={{
-                      padding: '14px 18px',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      cursor: 'pointer',
-                      background: isExpanded ? 'rgba(255, 255, 255, 0.04)' : 'transparent',
-                      flexWrap: 'wrap',
-                      gap: '12px'
-                    }}
+                    aria-expanded={isExpanded}
+                    data-cursor="hover"
+                    className="cc-row"
+                    style={{ border: 'none', borderBottom: '1px solid var(--line-hair)', background: 'none', width: '100%', cursor: 'pointer' }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                      <code style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: '700' }}>
-                        {log.audit_id}
-                      </code>
-                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>•</span>
-                      <span style={{ fontSize: '12px', color: 'var(--text)', fontWeight: '600' }}>
-                        {log.incident_id || 'INC-0001'}
-                      </span>
-                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>•</span>
-                      <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text)' }}>
-                        {log.action_type || log.action_name || 'reroute_gateway_traffic'}
-                      </span>
-                      {formatRiskBadge(log.action_tier)}
-                      {formatStatusBadge(log.new_status || log.approval_status)}
+                    <div className="cc-row-main" style={{ flexWrap: 'wrap' }}>
+                      {isExpanded ? <ChevronUp size={13} style={{ color: 'var(--cc-text-tertiary)', flexShrink: 0 }} /> : <ChevronDown size={13} style={{ color: 'var(--cc-text-tertiary)', flexShrink: 0 }} />}
+                      <span className="text-data" style={{ color: 'var(--cc-accent)' }}>{log.audit_id}</span>
+                      <span className="text-data" style={{ color: 'var(--cc-text-tertiary)' }}>{log.incident_id || 'INC-0001'}</span>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--cc-text-primary)' }}>{log.action_type || log.action_name || 'reroute_gateway_traffic'}</span>
+                      <Chip tone={RISK_TONE[riskKey] || 'critical'}>{riskKey}</Chip>
+                      <Chip tone={STATUS_TONE[statusKey] || 'medium'}>{STATUS_LABEL[statusKey] || statusKey}</Chip>
                     </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                      <span>Actor: <strong style={{ color: 'var(--text)' }}>{log.actor}</strong></span>
-                      <span>{new Date(log.timestamp).toLocaleString()}</span>
-                      <span style={{ color: 'var(--primary)', fontWeight: '600' }}>
-                        {isExpanded ? '▲ Hide' : '▼ Inspect'}
-                      </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexShrink: 0 }}>
+                      <span className="text-data">Actor: <strong style={{ color: 'var(--cc-text-secondary)' }}>{log.actor}</strong></span>
+                      <span className="text-data">{new Date(log.timestamp).toLocaleString()}</span>
                     </div>
-                  </div>
+                  </button>
 
-                  {/* Expanded Audit Details */}
-                  {isExpanded && (
-                    <div style={{ padding: '18px 20px', background: 'rgba(0, 0, 0, 0.25)', borderTop: '1px solid var(--border)', fontSize: '12px' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '14px' }}>
-                        <div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>
-                            Transition
+                  <AnimatePresence initial={false}>
+                    {isExpanded && (
+                      <motion.div
+                        initial={prefersReducedMotion ? false : { height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={prefersReducedMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                        style={{ overflow: 'hidden' }}
+                      >
+                        <div style={{ padding: '16px 0 20px 25px', fontSize: '12px' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '18px', marginBottom: '16px' }}>
+                            <div>
+                              <p className="cc-section-eyebrow" style={{ marginBottom: '4px' }}>Transition</p>
+                              <div className="text-data" style={{ color: 'var(--cc-text-primary)' }}>
+                                {log.previous_status || 'None'} → <strong style={{ color: 'var(--state-verified)' }}>{log.new_status}</strong>
+                              </div>
+                            </div>
+                            <div>
+                              <p className="cc-section-eyebrow" style={{ marginBottom: '4px' }}>Action ID &amp; investigation ID</p>
+                              <div className="text-data">Action: {log.action_id || '—'} · Inv: {log.investigation_id || '—'}</div>
+                            </div>
+                            <div>
+                              <p className="cc-section-eyebrow" style={{ marginBottom: '4px' }}>Governance policy</p>
+                              <div style={{ color: 'var(--cc-text-primary)' }}>
+                                {log.new_status === 'approved' ? 'Explicit human authorization granted' : log.new_status === 'rejected' ? 'Operator declined execution' : log.new_status === 'executed' ? 'Safe demonstration simulation executed' : 'Awaiting operator approval'}
+                              </div>
+                            </div>
                           </div>
-                          <div style={{ fontFamily: 'monospace', color: 'var(--text)' }}>
-                            {log.previous_status || 'None'} → <strong style={{ color: '#10b981' }}>{log.new_status}</strong>
-                          </div>
-                        </div>
 
-                        <div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>
-                            Action ID & Investigation ID
-                          </div>
-                          <div style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>
-                            Action: {log.action_id || '—'} | Inv: {log.investigation_id || '—'}
-                          </div>
-                        </div>
+                          {log.reason && (
+                            <div style={{ marginBottom: '14px' }}>
+                              <p className="cc-section-eyebrow" style={{ marginBottom: '4px' }}>Reason / operator notes</p>
+                              <div style={{ color: 'var(--cc-text-secondary)' }}>{log.reason}</div>
+                            </div>
+                          )}
 
-                        <div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>
-                            Governance Policy
-                          </div>
-                          <div style={{ color: 'var(--text)' }}>
-                            {log.new_status === 'approved' ? 'Explicit Human Authorization Granted' : log.new_status === 'rejected' ? 'Operator Declined Execution' : log.new_status === 'executed' ? 'Safe Demonstration Simulation Executed' : 'Awaiting Operator Approval'}
-                          </div>
+                          {hasExecResult && (
+                            <div>
+                              <p className="cc-section-eyebrow" style={{ marginBottom: '4px' }}>Execution result (verified safe simulation)</p>
+                              <pre style={{ margin: 0, padding: '10px 14px', background: 'var(--ink-sunken)', borderRadius: 'var(--r-sm)', overflowX: 'auto', color: 'var(--cc-accent)' }}>
+                                {JSON.stringify(log.execution_result, null, 2)}
+                              </pre>
+                              <div style={{ marginTop: '6px', color: 'var(--state-verified)', fontWeight: 600, fontSize: '11px' }}>
+                                Invariant verified: 0 live Razorpay payments modified.
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-
-                      {/* Reason / Operator Notes */}
-                      {log.reason && (
-                        <div style={{ marginBottom: '12px' }}>
-                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>
-                            Reason / Operator Notes
-                          </div>
-                          <div style={{ padding: '8px 12px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '4px', border: '1px solid var(--border)', color: 'var(--text)' }}>
-                            {log.reason}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Simulation Execution Result */}
-                      {hasExecResult && (
-                        <div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>
-                            Execution Result (Verified Safe Simulation)
-                          </div>
-                          <pre style={{ margin: 0, padding: '10px 14px', background: '#0f172a', borderRadius: '4px', border: '1px solid var(--border)', overflowX: 'auto', color: '#38bdf8' }}>
-                            {JSON.stringify(log.execution_result, null, 2)}
-                          </pre>
-                          <div style={{ marginTop: '6px', color: '#10b981', fontWeight: '600', fontSize: '11px' }}>
-                            ✓ Invariant Verified: 0 live Razorpay payments modified.
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               );
             })}
           </div>
         )}
-      </div>
+      </section>
 
     </div>
   );

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  runInvestigation, 
-  fetchIncidentInvestigations, 
+import { Search, ChevronDown, ChevronUp, Check, Users, Target, Zap } from 'lucide-react';
+import {
+  runInvestigation,
+  fetchIncidentInvestigations,
   fetchInvestigationSteps,
   fetchIncidentActions,
   fetchSimilarIncidents,
@@ -10,69 +11,64 @@ import {
   rejectAction,
   executeAction
 } from '../api';
+import { Card, SeverityRail, Button, Chip } from '../primitives';
 
-// One authoritative per-row status label derivable WITHOUT an extra per-incident
-// fetch (governed-action state like "awaiting approval" needs its own API call,
-// so the workspace list intentionally only shows what the incidents list already
-// carries: investigation_status. The detail pane on the right shows the fuller
-// approval/execution state once an incident is selected).
-const rowStatusPill = (inc) => ({
-  not_investigated: { label: 'PENDING INVESTIGATION', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.12)' },
-  investigating: { label: 'INVESTIGATING…', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.12)' },
-  investigated: { label: 'INVESTIGATED', color: '#34d399', bg: 'rgba(52, 211, 153, 0.12)' },
-  investigation_failed: { label: 'INVESTIGATION FAILED', color: '#f87171', bg: 'rgba(248, 113, 113, 0.12)' }
-}[inc.investigation_status || 'not_investigated']);
+const STATUS_CHIP = {
+  not_investigated: { tone: 'neutral', label: 'Pending investigation' },
+  investigating: { tone: 'accent', label: 'Investigating…' },
+  investigated: { tone: 'verified', label: 'Investigated' },
+  investigation_failed: { tone: 'critical', label: 'Investigation failed' },
+};
 
 function WorkspaceRow({ inc, isSelected, onClick, isCompleted }) {
-  const pill = rowStatusPill(inc);
+  const status = STATUS_CHIP[inc.investigation_status || 'not_investigated'];
   const isRejected = inc.status === 'rejected';
   return (
     <button
       onClick={onClick}
+      data-cursor="hover"
       style={{
         display: 'block',
         width: '100%',
         textAlign: 'left',
-        padding: isCompleted ? '9px 12px' : '11px 12px',
-        borderRadius: '6px',
-        border: isSelected ? '1px solid var(--border-hover)' : '1px solid transparent',
-        borderLeft: isSelected ? '2px solid var(--primary)' : '2px solid transparent',
-        background: isSelected ? 'var(--bg-card-hover)' : 'transparent',
-        opacity: isCompleted && !isSelected ? 0.62 : 1,
-        cursor: 'pointer',
-        marginBottom: '3px',
-        transition: 'opacity 0.15s ease'
+        padding: '10px 12px',
+        borderRadius: 'var(--r-sm)',
+        border: 'none',
+        borderLeft: isSelected ? '2px solid var(--cc-accent)' : '2px solid transparent',
+        background: isSelected ? 'var(--ink-hover)' : 'transparent',
+        opacity: isCompleted && !isSelected ? 0.6 : 1,
+        marginBottom: '2px',
+        transition: 'opacity var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out)'
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '3px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-          {!isCompleted && (
-            <span className={`badge badge-${inc.severity || 'medium'}`} style={{ fontSize: '9px', fontWeight: '800', padding: '1px 5px' }}>
-              {(inc.severity || 'medium').toUpperCase()}
-            </span>
-          )}
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', flexShrink: 0 }}>{inc.incident_id}</span>
+          {!isCompleted && <Chip tone={inc.severity || 'medium'}>{(inc.severity || 'medium').toUpperCase()}</Chip>}
+          <span className="text-data" style={{ color: 'var(--cc-text-tertiary)', flexShrink: 0 }}>{inc.incident_id}</span>
         </div>
-        {!isCompleted && (
-          <span style={{ fontSize: '9px', fontWeight: '700', padding: '1px 6px', borderRadius: '3px', background: pill.bg, color: pill.color, flexShrink: 0 }}>
-            {pill.label}
-          </span>
-        )}
-        {isCompleted && (
-          <span style={{ fontSize: '9px', fontWeight: '700', padding: '1px 6px', borderRadius: '3px', flexShrink: 0, color: isRejected ? '#94a3b8' : '#34d399', background: isRejected ? 'rgba(148, 163, 184, 0.1)' : 'rgba(52, 211, 153, 0.1)' }}>
-            {isRejected ? 'REJECTED' : 'RESOLVED'}
-          </span>
-        )}
+        {!isCompleted && <Chip tone={status.tone}>{status.label}</Chip>}
+        {isCompleted && <Chip tone={isRejected ? 'neutral' : 'verified'}>{isRejected ? 'Rejected' : 'Resolved'}</Chip>}
       </div>
-      <div style={{ fontSize: isCompleted ? '12.5px' : '13px', fontWeight: isCompleted ? '500' : '600', color: isCompleted ? 'var(--text-secondary)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div style={{ fontSize: isCompleted ? '12.5px' : '13px', fontWeight: isCompleted ? 500 : 600, color: isCompleted ? 'var(--cc-text-secondary)' : 'var(--cc-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {inc.title}
       </div>
-      <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+      <div className="text-data" style={{ marginTop: '2px' }}>
         {inc.target_entity_id} · {new Date(inc.detected_at).toLocaleDateString()}
       </div>
     </button>
   );
 }
+
+const relativeTime = (isoStr) => {
+  if (!isoStr) return null;
+  const diffMs = Date.now() - new Date(isoStr).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+};
 
 export default function InvestigationView({ incident, incidents = [], onSelectIncident, aiStatus, onRefreshAll }) {
   const [investigating, setInvestigating] = useState(false);
@@ -116,7 +112,6 @@ export default function InvestigationView({ incident, incidents = [], onSelectIn
       setSimilarCasesError("Case-memory similarity lookup failed — no similar incidents could be retrieved.");
     }
   };
-
 
   const loadInvestigationAndActions = async (incId) => {
     // Reset first so switching incidents never shows stale state from the
@@ -241,7 +236,7 @@ export default function InvestigationView({ incident, incidents = [], onSelectIn
     setActionMsg(null);
     try {
       await approveAction(actionId, "Operator authorized traffic cutover per FinOps incident governance policy");
-      setActionMsg("✓ Action approved by human operator. Ready for safe demonstration simulation.");
+      setActionMsg("Action approved by human operator. Ready for safe demonstration simulation.");
       const acts = await fetchIncidentActions(incident.incident_id);
       setActions(acts || []);
     } catch (e) {
@@ -275,7 +270,7 @@ export default function InvestigationView({ incident, incidents = [], onSelectIn
     setActionMsg(null);
     try {
       await executeAction(actionId);
-      setActionMsg("✓ Safe demonstration simulation completed. Immutable audit trail appended to PostgreSQL.");
+      setActionMsg("Safe demonstration simulation completed. Immutable audit trail appended to PostgreSQL.");
       const acts = await fetchIncidentActions(incident.incident_id);
       setActions(acts || []);
       // Execution resolves the parent incident (open -> resolved) — refresh the
@@ -308,48 +303,44 @@ export default function InvestigationView({ incident, incidents = [], onSelectIn
     .sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at));
 
   const workspaceSidebar = (
-    <div style={{ width: '320px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '18px' }}>
+    <div className="cc-investigation-sidebar" style={{ width: '300px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '22px' }}>
       <div>
-        <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
+        <div className="cc-section-eyebrow" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
           <span>Active / Pending</span>
           <span>{activeList.length}</span>
         </div>
         {activeList.length === 0 ? (
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '10px 0' }}>No open incidents.</div>
+          <div style={{ fontSize: '12px', color: 'var(--cc-text-tertiary)', padding: '10px 0' }}>No open incidents.</div>
         ) : (
-          <div>
-            {activeList.map(inc => (
-              <WorkspaceRow
-                key={inc.incident_id}
-                inc={inc}
-                isSelected={incident?.incident_id === inc.incident_id}
-                isCompleted={false}
-                onClick={() => onSelectIncident && onSelectIncident(inc)}
-              />
-            ))}
-          </div>
+          activeList.map(inc => (
+            <WorkspaceRow
+              key={inc.incident_id}
+              inc={inc}
+              isSelected={incident?.incident_id === inc.incident_id}
+              isCompleted={false}
+              onClick={() => onSelectIncident && onSelectIncident(inc)}
+            />
+          ))
         )}
       </div>
 
       <div>
-        <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
+        <div className="cc-section-eyebrow" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
           <span>Completed</span>
           <span>{completedList.length}</span>
         </div>
         {completedList.length === 0 ? (
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '10px 0' }}>No resolved incidents yet.</div>
+          <div style={{ fontSize: '12px', color: 'var(--cc-text-tertiary)', padding: '10px 0' }}>No resolved incidents yet.</div>
         ) : (
-          <div>
-            {completedList.map(inc => (
-              <WorkspaceRow
-                key={inc.incident_id}
-                inc={inc}
-                isSelected={incident?.incident_id === inc.incident_id}
-                isCompleted={true}
-                onClick={() => onSelectIncident && onSelectIncident(inc)}
-              />
-            ))}
-          </div>
+          completedList.map(inc => (
+            <WorkspaceRow
+              key={inc.incident_id}
+              inc={inc}
+              isSelected={incident?.incident_id === inc.incident_id}
+              isCompleted={true}
+              onClick={() => onSelectIncident && onSelectIncident(inc)}
+            />
+          ))
         )}
       </div>
     </div>
@@ -357,12 +348,12 @@ export default function InvestigationView({ incident, incidents = [], onSelectIn
 
   if (!incident) {
     return (
-      <div className="view-container" style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+      <div className="cc-investigation-layout" style={{ display: 'flex', gap: '32px', alignItems: 'flex-start' }}>
         {incidents.length > 0 && workspaceSidebar}
-        <div className="card" style={{ padding: '60px 24px', textAlign: 'center', color: 'var(--text-muted)', flex: 1 }}>
-          <div style={{ fontSize: '32px', marginBottom: '12px' }}>🔍</div>
-          <h3 style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)', margin: '0 0 8px 0' }}>
-            {incidents.length === 0 ? 'No Incidents Yet' : 'Select an Incident'}
+        <div style={{ padding: '60px 24px', textAlign: 'center', color: 'var(--cc-text-tertiary)', flex: 1 }}>
+          <Search size={26} strokeWidth={1.5} style={{ marginBottom: 12, color: 'var(--cc-text-tertiary)' }} />
+          <h3 className="text-card-title" style={{ margin: '0 0 8px' }}>
+            {incidents.length === 0 ? 'No incidents yet' : 'Select an incident'}
           </h3>
           <p style={{ fontSize: '13px', margin: 0 }}>
             {incidents.length === 0
@@ -386,14 +377,14 @@ export default function InvestigationView({ incident, incidents = [], onSelectIn
   // there is no single shared metric name across all four scenario families.
   const primaryRatePct = ev.failure_rate_pct ?? ev.actual_refund_rate_pct ?? ev.webhook_failure_rate_pct ?? null;
   const baselineRatePct = ev.peer_failure_rate_pct ?? ev.baseline_refund_rate_pct ?? null;
-  const primaryRateLabel = ev.failure_rate_pct != null ? 'FAILURE RATE' : (ev.actual_refund_rate_pct != null ? 'REFUND RATE' : (ev.webhook_failure_rate_pct != null ? 'WEBHOOK FAILURE RATE' : 'PRIMARY RATE'));
-  const baselineRateLabel = ev.peer_failure_rate_pct != null ? 'PEER BASELINE' : (ev.baseline_refund_rate_pct != null ? "MERCHANT'S OWN BASELINE" : 'PEER BASELINE');
+  const primaryRateLabel = ev.failure_rate_pct != null ? 'Failure rate' : (ev.actual_refund_rate_pct != null ? 'Refund rate' : (ev.webhook_failure_rate_pct != null ? 'Webhook failure rate' : 'Primary rate'));
+  const baselineRateLabel = ev.peer_failure_rate_pct != null ? 'Peer baseline' : (ev.baseline_refund_rate_pct != null ? "Merchant's own baseline" : 'Peer baseline');
 
   const failureRate = primaryRatePct;
   const peerRate = baselineRatePct;
   const ratio = ev.failure_rate_ratio ?? ev.refund_rate_ratio ?? (peerRate && Number(peerRate) > 0 && failureRate ? (Number(failureRate) / Number(peerRate)).toFixed(2) : null);
   const topErrors = ev.top_failure_code_count ?? ev.duplicate_refund_payments ?? null;
-  const topErrorsLabel = ev.top_failure_code_count != null ? 'GATEWAY TIMEOUTS' : (ev.duplicate_refund_payments != null ? 'DUPLICATE REFUNDS' : 'GATEWAY TIMEOUTS');
+  const topErrorsLabel = ev.top_failure_code_count != null ? 'Gateway timeouts' : (ev.duplicate_refund_payments != null ? 'Duplicate refunds' : 'Gateway timeouts');
   const totalFailed = ev.failed_payments_count ?? ev.total_refunds ?? (incident.affected_payments || null);
   const exposureAmt = investigationData?.estimated_exposure ?? (incident.potential_exposure || null);
   const merchantCount = isMerchantIncident ? 1 : (incident.affected_merchants || null);
@@ -414,513 +405,416 @@ export default function InvestigationView({ incident, incidents = [], onSelectIn
 
   const topSimilarCase = similarCases.length > 0 ? similarCases[0] : null;
 
+  // Evidence chain — a numbered sequence of the real signals behind this
+  // incident, in the order a reviewer would naturally read them: the
+  // anomaly that triggered detection, then the comparison that makes it
+  // meaningful, then its scale, then its cost. Each entry only appears if
+  // its underlying value is real (never a fabricated placeholder).
+  const evidenceChain = [
+    failureRate != null && { label: primaryRateLabel, value: `${failureRate}%`, detail: ratio != null ? `${ratio}x baseline` : null },
+    peerRate != null && { label: baselineRateLabel, value: `${peerRate}%`, detail: isMerchantIncident && ev.baseline_refund_rate_pct != null ? "this merchant's historical rate" : 'healthy peer average' },
+    topErrors != null && { label: topErrorsLabel, value: totalFailed != null ? `${topErrors} / ${totalFailed}` : String(topErrors), detail: topErrors != null && totalFailed ? `${((topErrors / totalFailed) * 100).toFixed(2)}% concentration` : null },
+    { label: isMerchantIncident ? 'Target merchant' : 'Affected merchants', value: isMerchantIncident ? (incident.target_entity_id || '—') : (merchantCount != null ? merchantCount : '—'), detail: isMerchantIncident ? 'single-merchant incident' : 'impacted across categories' },
+    { label: 'Potential exposure', value: exposureAmt != null ? `₹${Number(exposureAmt).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—', detail: 'unresolved transaction value' },
+  ].filter(Boolean);
+
   // Visible workflow stage: detected -> investigating -> investigated ->
   // recommendation available -> awaiting approval -> approved -> executed.
   // Nothing here implies "resolved" or "nothing found" just because a panel is empty.
   const workflowStage = (() => {
-    if (investigating) return { label: 'Investigating…', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.12)' };
-    if (!investigationData) return { label: 'Detected — not yet investigated', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.12)' };
-    if (investigationData.status === 'running') return { label: 'Investigating…', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.12)' };
-    if (investigationData.status === 'failed') return { label: 'Investigation attempt failed', color: '#f87171', bg: 'rgba(248, 113, 113, 0.12)' };
-    if (!primaryAction) return { label: 'Investigated — recommendation available', color: '#34d399', bg: 'rgba(52, 211, 153, 0.12)' };
-    if (primaryAction.status === 'pending_approval') return { label: 'Awaiting human approval', color: '#facc15', bg: 'rgba(250, 204, 21, 0.12)' };
-    if (primaryAction.status === 'approved') return { label: 'Approved — ready to execute', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.12)' };
-    if (primaryAction.status === 'executed') return { label: 'Executed (safe simulation)', color: '#34d399', bg: 'rgba(52, 211, 153, 0.12)' };
-    if (primaryAction.status === 'rejected') return { label: 'Rejected by human', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.12)' };
-    return { label: 'Investigated', color: '#34d399', bg: 'rgba(52, 211, 153, 0.12)' };
+    if (investigating) return { tone: 'accent', label: 'Investigating…' };
+    if (!investigationData) return { tone: 'neutral', label: 'Detected — not yet investigated' };
+    if (investigationData.status === 'running') return { tone: 'accent', label: 'Investigating…' };
+    if (investigationData.status === 'failed') return { tone: 'critical', label: 'Investigation attempt failed' };
+    if (!primaryAction) return { tone: 'verified', label: 'Investigated — recommendation available' };
+    if (primaryAction.status === 'pending_approval') return { tone: 'medium', label: 'Awaiting human approval' };
+    if (primaryAction.status === 'approved') return { tone: 'accent', label: 'Approved — ready to execute' };
+    if (primaryAction.status === 'executed') return { tone: 'verified', label: 'Executed (safe simulation)' };
+    if (primaryAction.status === 'rejected') return { tone: 'neutral', label: 'Rejected by human' };
+    return { tone: 'verified', label: 'Investigated' };
   })();
 
   return (
-    <div className="view-container" style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+    <div className="cc-investigation-layout" style={{ display: 'flex', gap: '32px', alignItems: 'flex-start' }}>
       {workspaceSidebar}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '36px' }}>
 
-      {/* 1. INCIDENT HEADER */}
-      <div className="card" style={{ padding: '24px', background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
-              <span className={`badge badge-${incident.severity || 'critical'}`} style={{ fontSize: '11px', fontWeight: '800' }}>
-                {incident.severity?.toUpperCase() || 'CRITICAL'}
-              </span>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-                {incident.incident_id}
-              </span>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>•</span>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                Target: <strong style={{ color: 'var(--text)' }}>{incident.target_entity_id || 'Gateway_X'}</strong>
-              </span>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>•</span>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                source: {incident.source || 'incident_lab'}
-              </span>
-              <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', background: workflowStage.bg, color: workflowStage.color, fontWeight: '700' }}>
-                {workflowStage.label}
-              </span>
-            </div>
-            <h1 style={{ fontSize: '22px', fontWeight: '800', color: 'var(--text)', margin: '0 0 6px 0' }}>
-              {incident.title}
-            </h1>
-            <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              Discovered by IsolationForest ML at: {new Date(incident.detected_at).toLocaleString()}
-            </div>
-            {investigationData?.status === 'completed' && (investigationData.completed_at || investigationData.started_at) && (
-              <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                Last investigated: <strong style={{ color: 'var(--text)' }}>{new Date(investigationData.completed_at || investigationData.started_at).toLocaleString()}</strong> — this is a saved result, not something that just happened
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
-            {/* Primary CTA only for a fresh, never-investigated incident — once a
-                real completed investigation exists, the loud primary action becomes
-                whatever the Action Governor panel below needs next (review/approve/
-                execute), and re-investigating is demoted to a small secondary link
-                so a completed incident never again looks like it "still needs
-                investigating". */}
-            {!investigationData || investigationData.status !== 'completed' ? (
-              <button
-                className="btn btn-primary"
-                onClick={handleInvestigate}
-                disabled={investigating || !isGeminiConnected}
-                style={{ padding: '10px 22px', fontWeight: '700', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}
-              >
-                {investigating ? (
-                  <>
-                    <span className="spinner"></span>
-                    Gemini Querying PostgreSQL...
-                  </>
-                ) : (
-                  <>⚡ Investigate with Gemini</>
-                )}
-              </button>
-            ) : (
-              <>
-                <span style={{ fontSize: '13px', fontWeight: '700', color: '#34d399', padding: '9px 18px', border: '1px solid rgba(52, 211, 153, 0.3)', borderRadius: '6px', background: 'rgba(52, 211, 153, 0.08)' }}>
-                  {primaryAction?.status === 'executed' || primaryAction?.status === 'approved' || primaryAction?.status === 'rejected'
-                    ? '👁 View Investigation (below)'
-                    : '📋 Review Recommendation (below)'}
-                </span>
-                <button
-                  onClick={handleInvestigate}
-                  disabled={investigating || !isGeminiConnected}
-                  title="Re-runs Gemini against current evidence. Secondary/debugging use — does not undo the existing recommendation or approval."
-                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '11.5px', fontWeight: '600', padding: '2px' }}
-                >
-                  {investigating ? 'Re-investigating…' : '↻ Re-investigate with Gemini'}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {errorMsg && (
-          <div style={{ marginTop: '16px', padding: '12px 16px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', color: '#f87171', fontSize: '13px' }}>
-            <strong>Investigation Notice:</strong> {errorMsg}
-          </div>
-        )}
-
-        {staleInvestigationNotice && (
-          <div style={{ marginTop: '16px', padding: '12px 16px', background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.3)', borderRadius: '6px', color: '#fbbf24', fontSize: '13px' }}>
-            <strong>Note:</strong> {staleInvestigationNotice}
-          </div>
-        )}
-      </div>
-
-      {/* 2. WHAT HAPPENED & WHY DID IT HAPPEN */}
-      <div className="card" style={{ padding: '24px' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          
-          {/* What Happened */}
-          <div>
-            <div style={{ fontSize: '12px', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
-              What Happened
-            </div>
-            <p style={{ margin: 0, fontSize: '15px', lineHeight: '1.6', color: 'var(--text)' }}>
-              {investigationData?.what_happened || incident.description || "No description recorded for this incident yet."}
-            </p>
-          </div>
-
-          <div style={{ height: '1px', background: 'var(--border)' }}></div>
-
-          {/* Why Did It Happen */}
-          <div>
-            <div style={{ fontSize: '12px', fontWeight: '800', color: '#facc15', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
-              Why Did It Happen? (Root Cause)
-            </div>
-            <p style={{ margin: 0, fontSize: '15px', lineHeight: '1.6', color: 'var(--text)' }}>
-              {investigationData?.why_it_happened || incident.primary_signal || "Root cause not yet determined — run \"Investigate with Gemini\" above."}
-            </p>
-          </div>
-
-        </div>
-      </div>
-
-      {/* 3. FIVE CORE EVIDENCE CARDS */}
-      <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        Current Incident Evidence
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-        
-        <div className="card" style={{ padding: '18px 20px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{primaryRateLabel}</div>
-          <div style={{ fontSize: '24px', fontWeight: '800', color: '#f87171', marginTop: '6px' }}>
-            {failureRate != null ? `${failureRate}%` : '—'}
-          </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {ratio != null ? `${ratio}x baseline` : 'No evidence recorded'}
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: '18px 20px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{baselineRateLabel}</div>
-          <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text)', marginTop: '6px' }}>
-            {peerRate != null ? `${peerRate}%` : '—'}
-          </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {isMerchantIncident && ev.baseline_refund_rate_pct != null ? "This merchant's historical rate" : 'Healthy peer average'}
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: '18px 20px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{topErrorsLabel}</div>
-          <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text)', marginTop: '6px' }}>
-            {topErrors != null && totalFailed != null ? `${topErrors} / ${totalFailed}` : (topErrors != null ? topErrors : '—')}
-          </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {topErrors != null && totalFailed ? `${((topErrors / totalFailed) * 100).toFixed(2)}% concentration` : 'No evidence recorded'}
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: '18px 20px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{isMerchantIncident ? 'TARGET MERCHANT' : 'AFFECTED MERCHANTS'}</div>
-          <div style={{ fontSize: isMerchantIncident ? '15px' : '24px', fontWeight: '800', color: 'var(--text)', marginTop: '6px' }}>
-            {isMerchantIncident ? (incident.target_entity_id || '—') : (merchantCount != null ? merchantCount : '—')}
-          </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {isMerchantIncident ? 'Single-merchant incident' : 'Impacted across categories'}
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: '18px 20px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>POTENTIAL EXPOSURE</div>
-          <div style={{ fontSize: '24px', fontWeight: '800', color: '#f87171', marginTop: '6px' }}>
-            {exposureAmt != null ? `₹${Number(exposureAmt).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
-          </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Unresolved transaction value
-          </div>
-        </div>
-
-      </div>
-
-      {/* 4. CASE MEMORY (HISTORICAL SIMULATION PRECEDENTS) */}
-      <div className="card" style={{ padding: '20px 24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(99, 102, 241, 0.15)', color: 'var(--primary)' }}>
-              🧠 CASE MEMORY • HISTORICAL SIMULATION PRECEDENTS
-            </span>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              (PostgreSQL-backed similarity matching)
-            </span>
-          </div>
-
-          {topSimilarCase && (
-            <span style={{ fontSize: '12px', fontWeight: '700', color: '#10b981' }}>
-              🎯 Top Match: {topSimilarCase.similarity_score_pct}% match ({topSimilarCase.match_tier}) — category + semantic signals
-            </span>
-          )}
-        </div>
-
-        {topSimilarCase ? (
-          <div style={{ padding: '14px 18px', background: 'rgba(0, 0, 0, 0.2)', borderRadius: '8px', border: '1px solid var(--border)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+        {/* INCIDENT CONTEXT — the selected incident as the visual anchor,
+            SeverityRail as the signature indicator down the left edge. */}
+        <div style={{ display: 'flex', gap: '18px' }}>
+          <SeverityRail
+            severity={incident.severity || 'critical'}
+            confidence={evidenceScore != null ? evidenceScore : 0}
+            approved={primaryAction?.status === 'executed'}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p className="cc-section-eyebrow" style={{ marginBottom: '6px' }}>Investigation</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
               <div>
-                <span style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--primary)', fontWeight: '700' }}>
-                  {topSimilarCase.historical_incident_id}
-                </span>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 8px' }}>•</span>
-                <strong style={{ fontSize: '14px', color: 'var(--text)' }}>
-                  {topSimilarCase.title}
-                </strong>
+                <h1 className="text-page-title" style={{ margin: '0 0 8px' }}>{incident.title}</h1>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--sev-critical)', fontWeight: 700, fontSize: '11px' }}>{(incident.severity || 'critical').toUpperCase()}</span>
+                  <span className="cc-system-strip-sep">·</span>
+                  <span className="text-data" style={{ color: 'var(--cc-text-tertiary)' }}>{incident.incident_id}</span>
+                  <span className="cc-system-strip-sep">·</span>
+                  <span style={{ fontSize: '12.5px', color: 'var(--cc-text-tertiary)' }}>{relativeTime(incident.detected_at)}</span>
+                  <Chip tone={workflowStage.tone}>{workflowStage.label}</Chip>
+                </div>
               </div>
-              <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
-                {topSimilarCase.provenance}
-              </span>
+
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+                {!investigationData || investigationData.status !== 'completed' ? (
+                  <Button
+                    tier="primary"
+                    onClick={handleInvestigate}
+                    state={investigating ? 'loading' : 'idle'}
+                    loadingLabel="Querying Gemini"
+                    disabled={!isGeminiConnected}
+                  >
+                    <Zap size={13} strokeWidth={2} style={{ marginRight: 6 }} />
+                    Investigate with Gemini
+                  </Button>
+                ) : (
+                  <>
+                    <Chip tone="verified">
+                      {primaryAction?.status === 'executed' || primaryAction?.status === 'approved' || primaryAction?.status === 'rejected'
+                        ? 'View investigation below'
+                        : 'Review recommendation below'}
+                    </Chip>
+                    <button
+                      onClick={handleInvestigate}
+                      disabled={investigating || !isGeminiConnected}
+                      title="Re-runs Gemini against current evidence. Secondary/debugging use — does not undo the existing recommendation or approval."
+                      style={{ background: 'none', border: 'none', color: 'var(--cc-text-tertiary)', cursor: 'pointer', fontSize: '11.5px', fontWeight: 600, padding: '2px' }}
+                      data-cursor="hover"
+                    >
+                      {investigating ? 'Re-investigating…' : 'Re-investigate with Gemini'}
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
-            {topSimilarCase.factors && (
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '10px 0', padding: '10px 12px', background: 'rgba(0,0,0,0.25)', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                <div style={{ fontWeight: '700', color: 'var(--text)', marginBottom: '6px' }}>
-                  {topSimilarCase.similarity_score_pct}% is a weighted composite, not raw semantic similarity — breakdown:
-                </div>
-                <div>Raw embedding cosine similarity: <strong>{topSimilarCase.cosine_similarity}</strong> (contributes {topSimilarCase.factors.cosine_sim_contrib} pts)</div>
-                <div>Incident type match: {topSimilarCase.factors.type_match} pts · Entity match: {topSimilarCase.factors.entity_match} pts · Error code match: {topSimilarCase.factors.error_code_match} pts · Severity match: {topSimilarCase.factors.severity_match} pts</div>
-              </div>
+            {errorMsg && (
+              <p style={{ marginTop: '14px', fontSize: '13px', color: 'var(--sev-critical)' }}>
+                <strong>Investigation notice: </strong>{errorMsg}
+              </p>
             )}
-
-            <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.5', marginTop: '6px' }}>
-              <div><strong>Historical Root Cause:</strong> {topSimilarCase.historical_root_cause}</div>
-              <div style={{ marginTop: '4px' }}><strong>Previous Action Taken:</strong> {topSimilarCase.previous_action}</div>
-              <div style={{ marginTop: '4px', color: '#10b981' }}><strong>Historical Outcome:</strong> {topSimilarCase.outcome}</div>
-            </div>
+            {staleInvestigationNotice && (
+              <p style={{ marginTop: '8px', fontSize: '13px', color: 'var(--sev-medium)' }}>
+                <strong>Note: </strong>{staleInvestigationNotice}
+              </p>
+            )}
           </div>
-        ) : (
-          <div style={{ fontSize: '13px', color: similarCasesError ? '#f87171' : 'var(--text-muted)' }}>
-            {similarCasesError || 'No similar historical incidents found in Case Memory for this incident.'}
-          </div>
-        )}
-      </div>
+        </div>
 
-      {/* 5. AFFECTED MERCHANTS — gateway-type incidents only; a merchant-type
-          incident's single target is already shown in the evidence card above. */}
-      {!isMerchantIncident && (
-        <div className="card" style={{ padding: '20px 24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <span style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text)' }}>
-                👥 Affected Merchants: <strong>{merchantCount != null ? `${merchantCount} merchants` : 'No evidence recorded'}</strong>
-              </span>
-            </div>
+        {/* THE FINDING — the conclusion as the focal point, not buried in a card. */}
+        <div>
+          <p className="cc-section-eyebrow" style={{ color: 'var(--cc-accent)', marginBottom: '10px' }}>Investigation finding</p>
+          <p style={{ margin: 0, fontSize: '21px', lineHeight: '1.4', fontWeight: 550, color: 'var(--cc-text-primary)', maxWidth: '880px' }}>
+            {investigationData?.what_happened || incident.description || "No description recorded for this incident yet."}
+          </p>
+          <div style={{ height: '1px', background: 'var(--line-hair)', margin: '24px 0' }} />
+          <p className="cc-section-eyebrow" style={{ color: 'var(--sev-medium)', marginBottom: '8px' }}>Why — root cause</p>
+          <p style={{ margin: 0, fontSize: '15px', lineHeight: '1.6', color: 'var(--cc-text-secondary)', maxWidth: '760px' }}>
+            {investigationData?.why_it_happened || incident.primary_signal || 'Root cause not yet determined — run "Investigate with Gemini" above.'}
+          </p>
+        </div>
 
-            <button
-              onClick={() => setShowMerchants(!showMerchants)}
-              style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
-            >
-              {showMerchants ? '▲ Hide Merchant List' : '▼ View Affected Merchants'}
-            </button>
-          </div>
-
-          {showMerchants && (
-            <div style={{ marginTop: '16px', padding: '14px 18px', background: 'rgba(0, 0, 0, 0.2)', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              {affectedMerchantsList.length > 0 ? (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
-                  {affectedMerchantsList.map((m, idx) => (
-                    <div key={idx} style={{ padding: '8px 12px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '4px', border: '1px solid var(--border)', fontSize: '12px' }}>
-                      <strong style={{ color: 'var(--text)' }}>{m.merchant_name || m.merchant_id}</strong>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{m.failures_count || m.failures} failures</div>
-                    </div>
-                  ))}
+        {/* EVIDENCE — a chain, not a card grid. */}
+        <div>
+          <p className="cc-section-eyebrow" style={{ marginBottom: '16px' }}>Evidence</p>
+          <div className="cc-evidence-chain">
+            {evidenceChain.map((e, i) => (
+              <div key={i} className="cc-evidence-item">
+                <span className="cc-evidence-index text-data">{String(i + 1).padStart(2, '0')}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="cc-evidence-label">{e.label}</div>
+                  <div className="cc-evidence-value text-metric cc-numeric">{e.value}</div>
+                  {e.detail && <div className="cc-evidence-detail">{e.detail}</div>}
                 </div>
-              ) : (
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  No per-merchant breakdown was returned by this investigation's <code>get_affected_merchants</code> tool call yet — run or re-run the investigation to populate this list from real PostgreSQL data.
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* CASE MEMORY */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+            <p className="cc-section-eyebrow" style={{ margin: 0 }}>Case memory — historical precedent</p>
+            {topSimilarCase && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 600, color: 'var(--state-verified)' }}>
+                <Target size={13} strokeWidth={2} />
+                {topSimilarCase.similarity_score_pct}% match ({topSimilarCase.match_tier})
+              </span>
+            )}
+          </div>
+
+          {topSimilarCase ? (
+            <Card>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                <div>
+                  <span className="text-data" style={{ color: 'var(--cc-accent)' }}>{topSimilarCase.historical_incident_id}</span>
+                  <span style={{ color: 'var(--cc-text-tertiary)', margin: '0 8px' }}>·</span>
+                  <strong style={{ fontSize: '14px', color: 'var(--cc-text-primary)' }}>{topSimilarCase.title}</strong>
+                </div>
+                <Chip>{topSimilarCase.provenance}</Chip>
+              </div>
+
+              {topSimilarCase.factors && (
+                <div style={{ fontSize: '11.5px', color: 'var(--cc-text-tertiary)', margin: '10px 0', padding: '10px 12px', background: 'var(--ink-sunken)', borderRadius: 'var(--r-sm)' }}>
+                  <div style={{ fontWeight: 600, color: 'var(--cc-text-secondary)', marginBottom: '6px' }}>
+                    {topSimilarCase.similarity_score_pct}% is a weighted composite, not raw semantic similarity — breakdown:
+                  </div>
+                  <div>Raw embedding cosine similarity: <strong>{topSimilarCase.cosine_similarity}</strong> (contributes {topSimilarCase.factors.cosine_sim_contrib} pts)</div>
+                  <div>Incident type match: {topSimilarCase.factors.type_match} pts · Entity match: {topSimilarCase.factors.entity_match} pts · Error code match: {topSimilarCase.factors.error_code_match} pts · Severity match: {topSimilarCase.factors.severity_match} pts</div>
                 </div>
               )}
-            </div>
+
+              <div style={{ fontSize: '13px', color: 'var(--cc-text-secondary)', lineHeight: '1.5', marginTop: '6px' }}>
+                <div><strong style={{ color: 'var(--cc-text-primary)' }}>Historical root cause:</strong> {topSimilarCase.historical_root_cause}</div>
+                <div style={{ marginTop: '4px' }}><strong style={{ color: 'var(--cc-text-primary)' }}>Previous action taken:</strong> {topSimilarCase.previous_action}</div>
+                <div style={{ marginTop: '4px', color: 'var(--state-verified)' }}><strong>Historical outcome:</strong> {topSimilarCase.outcome}</div>
+              </div>
+            </Card>
+          ) : (
+            <p style={{ fontSize: '13px', color: similarCasesError ? 'var(--sev-critical)' : 'var(--cc-text-tertiary)' }}>
+              {similarCasesError || 'No similar historical incidents found in Case Memory for this incident.'}
+            </p>
           )}
         </div>
-      )}
 
-      {/* 6. EVIDENCE CONFIDENCE & AI RECOMMENDATION */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
-        
-        {/* Evidence Confidence Card */}
-        <div className="card" style={{ padding: '22px 24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>
-              EVIDENCE CONFIDENCE
-            </span>
-            <span style={{ fontSize: '16px', fontWeight: '800', color: '#60a5fa' }}>
-              {evidenceScore != null ? `${evidenceScore}% • ${evidenceScore >= 80 ? 'VERY HIGH' : evidenceScore >= 60 ? 'HIGH' : evidenceScore >= 40 ? 'MODERATE' : 'LOW'}` : 'Not yet computed'}
-            </span>
-          </div>
-          <p style={{ margin: '8px 0 10px 0', fontSize: '13px', lineHeight: '1.5', color: 'var(--text)' }}>
-            {evidenceScore != null
-              ? 'Evidence confidence is derived deterministically from 5 independent database and anomaly signals:'
-              : 'Run "Investigate with Gemini" to compute evidence confidence from real signals.'}
-          </p>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <div>• <strong>Anomaly Strength (25%):</strong> IsolationForest score {incident.anomaly_score != null ? incident.anomaly_score : '—'} (Flagged Anomaly)</div>
-            <div>• <strong>Peer Deviation (25%):</strong> {failureRate != null && ratio != null && peerRate != null ? `${failureRate}% failure rate is ${ratio}x peer baseline (${peerRate}%)` : 'No evidence recorded'}</div>
-            <div>• <strong>Concentration (20%):</strong> {topErrors != null && totalFailed ? `${((topErrors / totalFailed) * 100).toFixed(2)}% share are ${topErrorsLabel.toLowerCase()}` : 'No evidence recorded'}</div>
-            <div>• <strong>Sample Volume (15%):</strong> {totalFailed != null ? `${totalFailed} failed transactions analyzed` : 'No evidence recorded'}</div>
-            <div>• <strong>Merchant Breadth (15%):</strong> {merchantCount != null ? `Failures corroborated across ${merchantCount} distinct merchants` : 'No evidence recorded'}</div>
-          </div>
-        </div>
-
-        {/* AI Recommendation Card */}
-        <div className="card" style={{ padding: '22px 24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
-            <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
-              AI-GENERATED RECOMMENDATION
-            </span>
-            <span style={{ fontSize: '11px', color: '#facc15', fontWeight: '600' }}>
-              Human approval required
-            </span>
-          </div>
-          <p style={{ margin: '8px 0 0 0', fontSize: '14px', lineHeight: '1.6', color: 'var(--text)' }}>
-            {investigationData?.recommendation || "No AI recommendation yet — run \"Investigate with Gemini\" above to generate one from real evidence."}
-          </p>
-        </div>
-
-      </div>
-
-      {/* 7. ACTION GOVERNOR (HUMAN-IN-THE-LOOP) */}
-      <div className="card" style={{ padding: '24px', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.02)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+        {/* AFFECTED MERCHANTS — gateway-type incidents only; a merchant-type
+            incident's single target is already shown in the evidence above. */}
+        {!isMerchantIncident && (
           <div>
-            <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.4)' }}>
-              Risk: RED • Human approval required
-            </span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Users size={14} strokeWidth={2} style={{ color: 'var(--cc-text-tertiary)' }} />
+                <span style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--cc-text-primary)' }}>
+                  Affected merchants: <strong>{merchantCount != null ? `${merchantCount} merchants` : 'No evidence recorded'}</strong>
+                </span>
+              </div>
+              <button
+                onClick={() => setShowMerchants(!showMerchants)}
+                data-cursor="hover"
+                style={{ background: 'none', border: 'none', color: 'var(--cc-accent)', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+              >
+                {showMerchants ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                {showMerchants ? 'Hide merchant list' : 'View affected merchants'}
+              </button>
+            </div>
+
+            {showMerchants && (
+              <div style={{ marginTop: '14px', padding: '14px 16px', background: 'var(--ink-sunken)', borderRadius: 'var(--r-md)' }}>
+                {affectedMerchantsList.length > 0 ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+                    {affectedMerchantsList.map((m, idx) => (
+                      <div key={idx} style={{ padding: '8px 12px', background: 'var(--ink-raised)', borderRadius: 'var(--r-sm)', fontSize: '12px' }}>
+                        <strong style={{ color: 'var(--cc-text-primary)' }}>{m.merchant_name || m.merchant_id}</strong>
+                        <div style={{ color: 'var(--cc-text-tertiary)', fontSize: '11px' }}>{m.failures_count || m.failures} failures</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '12px', color: 'var(--cc-text-tertiary)' }}>
+                    No per-merchant breakdown was returned by this investigation's <span className="text-data">get_affected_merchants</span> tool call yet — run or re-run the investigation to populate this list from real PostgreSQL data.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* CONFIDENCE vs RECOMMENDATION — kept visually distinct: what the
+            evidence measures is not the same claim as what the system
+            recommends doing about it. */}
+        <div className="cc-metric-band" style={{ alignItems: 'flex-start', borderBottom: 'none', paddingBottom: 0 }}>
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <p className="cc-section-eyebrow" style={{ margin: 0 }}>Evidence says</p>
+              <span className="text-data" style={{ fontSize: '15px', fontWeight: 700, color: 'var(--cc-accent)' }}>
+                {evidenceScore != null ? `${evidenceScore}% · ${evidenceScore >= 80 ? 'Very high' : evidenceScore >= 60 ? 'High' : evidenceScore >= 40 ? 'Moderate' : 'Low'} confidence` : 'Not yet computed'}
+              </span>
+            </div>
+            <p style={{ margin: '0 0 10px', fontSize: '13px', lineHeight: '1.5', color: 'var(--cc-text-secondary)' }}>
+              {evidenceScore != null
+                ? 'Derived deterministically from five independent database and anomaly signals:'
+                : 'Run "Investigate with Gemini" to compute evidence confidence from real signals.'}
+            </p>
+            <div style={{ fontSize: '11.5px', color: 'var(--cc-text-tertiary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div>Anomaly strength (25%) — IsolationForest score {incident.anomaly_score != null ? incident.anomaly_score : '—'}</div>
+              <div>Peer deviation (25%) — {failureRate != null && ratio != null && peerRate != null ? `${failureRate}% is ${ratio}x peer baseline (${peerRate}%)` : 'No evidence recorded'}</div>
+              <div>Concentration (20%) — {topErrors != null && totalFailed ? `${((topErrors / totalFailed) * 100).toFixed(2)}% share are ${topErrorsLabel.toLowerCase()}` : 'No evidence recorded'}</div>
+              <div>Sample volume (15%) — {totalFailed != null ? `${totalFailed} failed transactions analyzed` : 'No evidence recorded'}</div>
+              <div>Merchant breadth (15%) — {merchantCount != null ? `corroborated across ${merchantCount} distinct merchants` : 'No evidence recorded'}</div>
+            </div>
+          </div>
+
+          <div className="cc-metric-band-divider" />
+
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+              <p className="cc-section-eyebrow" style={{ margin: 0, color: 'var(--state-verified)' }}>System recommends</p>
+              <span style={{ fontSize: '11px', color: 'var(--sev-medium)', fontWeight: 600 }}>Human approval required</span>
+            </div>
+            <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.6', color: 'var(--cc-text-primary)' }}>
+              {investigationData?.recommendation || 'No AI recommendation yet — run "Investigate with Gemini" above to generate one from real evidence.'}
+            </p>
+          </div>
+        </div>
+
+        {/* ACTION — consequential, restrained. */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '12px' }}>
+            <Chip tone="critical">Risk: red · human approval required</Chip>
+            {primaryAction && (
+              <Chip tone={primaryAction.status === 'executed' ? 'verified' : primaryAction.status === 'approved' ? 'accent' : primaryAction.status === 'rejected' ? 'neutral' : 'medium'}>
+                {primaryAction.status === 'executed' ? 'Executed — simulation only' : primaryAction.status === 'approved' ? 'Approved by human' : primaryAction.status === 'rejected' ? 'Rejected' : 'Pending approval'}
+              </Chip>
+            )}
+          </div>
+
+          <div style={{ padding: '20px', background: 'var(--ink-sunken)', borderRadius: 'var(--r-md)' }}>
+            <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--cc-text-primary)', marginBottom: '6px' }}>
+              {incident.target_entity_type === 'merchant' ? (
+                <>Pause settlements for <span className="text-data" style={{ color: 'var(--sev-critical)' }}>{incident.target_entity_id}</span> pending review</>
+              ) : (
+                <>Reroute traffic away from <span className="text-data" style={{ color: 'var(--sev-critical)' }}>{incident.target_entity_id || 'Gateway_X'}</span></>
+              )}
+            </div>
+            <div style={{ fontSize: '13px', color: 'var(--cc-text-secondary)', lineHeight: '1.5', marginBottom: '16px' }}>
+              <strong style={{ color: 'var(--cc-text-primary)' }}>Policy reason: </strong>
+              {incident.primary_signal || (incident.target_entity_type === 'merchant'
+                ? `Anomalous account activity detected for ${incident.target_entity_id}.`
+                : `High failure concentration on ${incident.target_entity_id || 'this gateway'} relative to peer baseline.`)}
+            </div>
+
+            {primaryAction ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                {primaryAction.status === 'pending_approval' && (
+                  <>
+                    <Button
+                      tier="ghost"
+                      tone="verified"
+                      onClick={() => handleApprove(primaryAction.action_id)}
+                      state={actionLoading ? 'loading' : 'idle'}
+                      loadingLabel="Approving"
+                      successLabel="Approved"
+                    >
+                      <Check size={13} strokeWidth={2} style={{ marginRight: 6 }} />
+                      Approve action
+                    </Button>
+                    <Button
+                      tier="ghost"
+                      tone="critical"
+                      onClick={() => handleReject(primaryAction.action_id)}
+                      state={actionLoading ? 'loading' : 'idle'}
+                      loadingLabel="Rejecting"
+                    >
+                      Reject
+                    </Button>
+                  </>
+                )}
+
+                {primaryAction.status === 'approved' && (
+                  <Button
+                    tier="ghost"
+                    tone="warning"
+                    onClick={() => handleExecuteSimulation(primaryAction.action_id)}
+                    state={actionLoading ? 'loading' : 'idle'}
+                    loadingLabel="Executing"
+                    successLabel="Executed"
+                  >
+                    <Zap size={13} strokeWidth={2} style={{ marginRight: 6 }} />
+                    Execute safe simulation
+                  </Button>
+                )}
+
+                {primaryAction.status === 'executed' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: 'var(--state-verified)', fontSize: '13px', fontWeight: 600, flexWrap: 'wrap' }}>
+                      <span>Approved by human operator</span>
+                      <span>·</span>
+                      <span>Safe demonstration simulation executed</span>
+                      <span>·</span>
+                      <span>Immutable audit log appended</span>
+                    </div>
+                    <div style={{ marginTop: '6px', padding: '12px 14px', background: 'var(--ink-raised)', borderRadius: 'var(--r-sm)', fontSize: '12px' }}>
+                      <div style={{ color: 'var(--cc-accent)', fontWeight: 600, marginBottom: '4px' }}>
+                        Simulation only: {primaryAction.execution_result?.message || "Traffic diversion simulation completed successfully."}
+                      </div>
+                      <div style={{ color: 'var(--state-verified)', fontWeight: 600 }}>0 live Razorpay payments modified.</div>
+                    </div>
+                  </div>
+                )}
+
+                {primaryAction.status === 'rejected' && (
+                  <div style={{ color: 'var(--cc-text-tertiary)', fontSize: '13px', fontStyle: 'italic' }}>
+                    Action rejected by human operator. Zero traffic diversion permitted. Recorded in audit trail.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ fontSize: '13px', color: 'var(--cc-text-tertiary)' }}>
+                Click <strong style={{ color: 'var(--cc-text-secondary)' }}>"Investigate with Gemini"</strong> above to evaluate telemetry and propose this governed action.
+              </div>
+            )}
+
+            {actionMsg && (
+              <p style={{ marginTop: '12px', fontSize: '12.5px', color: 'var(--cc-accent)' }}>{actionMsg}</p>
+            )}
           </div>
 
           {primaryAction && (
-            <span style={{ 
-              fontSize: '11px', 
-              fontWeight: '700', 
-              padding: '4px 10px', 
-              borderRadius: '4px', 
-              background: primaryAction.status === 'executed' ? 'rgba(16, 185, 129, 0.2)' : primaryAction.status === 'approved' ? 'rgba(59, 130, 246, 0.2)' : primaryAction.status === 'rejected' ? 'rgba(100, 116, 139, 0.2)' : 'rgba(234, 179, 8, 0.2)',
-              color: primaryAction.status === 'executed' ? '#10b981' : primaryAction.status === 'approved' ? '#60a5fa' : primaryAction.status === 'rejected' ? '#94a3b8' : '#facc15',
-              border: '1px solid var(--border)',
-              textTransform: 'uppercase'
-            }}>
-              {primaryAction.status === 'executed' ? 'EXECUTED — SIMULATION ONLY' : primaryAction.status === 'approved' ? 'APPROVED BY HUMAN' : primaryAction.status === 'rejected' ? 'REJECTED' : 'PENDING APPROVAL'}
-            </span>
+            <p style={{ margin: '12px 4px 0', fontSize: '11.5px', color: 'var(--cc-text-disabled)' }}>
+              Action → recorded → audit trail. See Audit Log for the immutable record of this action.
+            </p>
           )}
         </div>
 
-        <div style={{ background: 'rgba(0, 0, 0, 0.2)', padding: '18px 20px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-          <div style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text)', marginBottom: '6px' }}>
-            {incident.target_entity_type === 'merchant' ? (
-              <>Pause settlements for <code style={{ color: '#f87171' }}>{incident.target_entity_id}</code> pending review</>
-            ) : (
-              <>Reroute traffic away from <code style={{ color: '#f87171' }}>{incident.target_entity_id || 'Gateway_X'}</code></>
-            )}
-          </div>
-          <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '14px' }}>
-            <strong>Policy Reason:</strong> {incident.primary_signal || (incident.target_entity_type === 'merchant'
-              ? `Anomalous account activity detected for ${incident.target_entity_id}.`
-              : `High failure concentration on ${incident.target_entity_id || 'this gateway'} relative to peer baseline.`)}
-          </div>
-
-          {/* Action Control Buttons */}
-          {primaryAction ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              {primaryAction.status === 'pending_approval' && (
-                <>
-                  <button 
-                    className="btn btn-primary"
-                    onClick={() => handleApprove(primaryAction.action_id)}
-                    disabled={actionLoading}
-                    style={{ background: '#10b981', borderColor: '#10b981', padding: '9px 20px', fontWeight: '700' }}
-                  >
-                    ✓ Approve Action
-                  </button>
-                  <button 
-                    className="btn"
-                    onClick={() => handleReject(primaryAction.action_id)}
-                    disabled={actionLoading}
-                    style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '9px 18px', fontWeight: '600' }}
-                  >
-                    ✕ Reject
-                  </button>
-                </>
-              )}
-
-              {primaryAction.status === 'approved' && (
-                <button 
-                  className="btn btn-primary"
-                  onClick={() => handleExecuteSimulation(primaryAction.action_id)}
-                  disabled={actionLoading}
-                  style={{ background: '#3b82f6', borderColor: '#3b82f6', padding: '9px 22px', fontWeight: '700' }}
-                >
-                  ⚡ Execute Safe Simulation
-                </button>
-              )}
-
-              {primaryAction.status === 'executed' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: '#10b981', fontSize: '13px', fontWeight: '700', flexWrap: 'wrap' }}>
-                    <span>✓ Approved by human operator</span>
-                    <span>•</span>
-                    <span>✓ Safe demonstration simulation executed</span>
-                    <span>•</span>
-                    <span>✓ Immutable audit log appended</span>
-                  </div>
-
-                  <div style={{ marginTop: '6px', padding: '12px 14px', background: '#0f172a', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }}>
-                    <div style={{ color: '#38bdf8', fontWeight: '700', marginBottom: '4px' }}>
-                      SIMULATION ONLY: {primaryAction.execution_result?.message || "Traffic diversion simulation completed successfully."}
-                    </div>
-                    <div style={{ color: '#10b981', fontWeight: '600' }}>
-                      0 live Razorpay payments modified.
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {primaryAction.status === 'rejected' && (
-                <div style={{ color: '#94a3b8', fontSize: '13px', fontStyle: 'italic' }}>
-                  Action rejected by human operator. Zero traffic diversion permitted. Recorded in audit trail.
-                </div>
-              )}
-            </div>
-          ) : (
-            <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              Click <strong>"⚡ Investigate with Gemini"</strong> above to evaluate telemetry and propose this governed action.
-            </div>
-          )}
-
-          {actionMsg && (
-            <div style={{ marginTop: '12px', padding: '8px 12px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '6px', color: '#60a5fa', fontSize: '12px' }}>
-              {actionMsg}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 8. AI TOOL TRACE (COLLAPSED BY DEFAULT) */}
-      <div className="card" style={{ padding: '20px 24px' }}>
-        <details style={{ cursor: 'pointer' }}>
-          <summary style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        {/* AI TOOL TRACE (COLLAPSED BY DEFAULT) */}
+        <details>
+          <summary style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--cc-text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} data-cursor="hover">
             <span>View AI investigation trace ({steps.length} tool calls executed against PostgreSQL)</span>
-            <span style={{ fontSize: '12px', color: 'var(--primary)' }}>Toggle Details</span>
+            <span style={{ fontSize: '12px', color: 'var(--cc-accent)' }}>Toggle details</span>
           </summary>
 
-          <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {steps.length === 0 ? (
-              <div style={{ fontSize: '13px', color: 'var(--text-muted)', padding: '10px 0' }}>
-                No tool steps recorded yet. Click <strong>"Investigate with Gemini"</strong> above to trigger live multi-turn tool calling.
+              <div style={{ fontSize: '13px', color: 'var(--cc-text-tertiary)', padding: '10px 0' }}>
+                No tool steps recorded yet. Click <strong style={{ color: 'var(--cc-text-secondary)' }}>"Investigate with Gemini"</strong> above to trigger live multi-turn tool calling.
               </div>
             ) : (
               steps.map((st, idx) => (
-                <div key={st.step_id || idx} style={{ border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
-                  <div 
+                <div key={st.step_id || idx} style={{ border: '1px solid var(--line-hair)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
+                  <div
                     onClick={() => setExpandedStep(expandedStep === idx ? null : idx)}
-                    style={{ 
-                      padding: '10px 14px', 
-                      background: 'rgba(255, 255, 255, 0.03)', 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
-                      alignItems: 'center',
-                      fontSize: '13px'
-                    }}
+                    data-cursor="hover"
+                    style={{ padding: '10px 14px', background: 'var(--ink-raised)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', cursor: 'pointer' }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span>
-                      <span style={{ fontFamily: 'monospace', fontWeight: '700', color: 'var(--primary)' }}>
+                      <Check size={13} strokeWidth={2} style={{ color: 'var(--state-verified)' }} />
+                      <span className="text-data" style={{ fontWeight: 700, color: 'var(--cc-accent)' }}>
                         Step {st.step_number || idx + 1}: Gemini → {st.tool_name}
                       </span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '11px', color: 'var(--text-muted)' }}>
-                      <span>{expandedStep === idx ? "▲ Hide" : "▼ Inspect Tool Arguments & Output"}</span>
-                    </div>
+                    <span style={{ fontSize: '11px', color: 'var(--cc-text-tertiary)' }}>
+                      {expandedStep === idx ? 'Hide' : 'Inspect tool arguments & output'}
+                    </span>
                   </div>
 
                   {expandedStep === idx && (
-                    <div style={{ padding: '12px 14px', background: 'rgba(0, 0, 0, 0.2)', borderTop: '1px solid var(--border)', fontSize: '12px' }}>
+                    <div style={{ padding: '12px 14px', background: 'var(--ink-sunken)', borderTop: '1px solid var(--line-hair)', fontSize: '12px' }}>
                       <div style={{ marginBottom: '8px' }}>
-                        <strong style={{ color: 'var(--text-muted)' }}>Input Arguments:</strong>
-                        <pre style={{ margin: '4px 0', padding: '8px', background: '#0f172a', borderRadius: '4px', overflowX: 'auto' }}>
+                        <strong style={{ color: 'var(--cc-text-tertiary)' }}>Input arguments:</strong>
+                        <pre style={{ margin: '4px 0', padding: '8px', background: 'var(--ink-page)', borderRadius: 'var(--r-sm)', overflowX: 'auto' }}>
                           {JSON.stringify(st.arguments || st.input_json, null, 2)}
                         </pre>
                       </div>
                       <div>
-                        <strong style={{ color: 'var(--text-muted)' }}>Database Output:</strong>
-                        <pre style={{ margin: '4px 0', padding: '8px', background: '#0f172a', borderRadius: '4px', overflowX: 'auto', maxHeight: '200px' }}>
+                        <strong style={{ color: 'var(--cc-text-tertiary)' }}>Database output:</strong>
+                        <pre style={{ margin: '4px 0', padding: '8px', background: 'var(--ink-page)', borderRadius: 'var(--r-sm)', overflowX: 'auto', maxHeight: '200px' }}>
                           {JSON.stringify(st.result || st.output_json, null, 2)}
                         </pre>
                       </div>
@@ -931,7 +825,6 @@ export default function InvestigationView({ incident, incidents = [], onSelectIn
             )}
           </div>
         </details>
-      </div>
 
       </div>
     </div>

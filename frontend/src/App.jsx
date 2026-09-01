@@ -1,5 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Header from './components/Header';
+import RouteProgress from './components/RouteProgress';
+import PageTransition from './components/PageTransition';
+import CustomCursor from './components/CustomCursor';
 import OverviewView from './components/OverviewView';
 import DataView from './components/DataView';
 import InvestigationView from './components/InvestigationView';
@@ -26,6 +29,27 @@ export default function App() {
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [isDetecting, setIsDetecting] = useState(false);
   const [notification, setNotification] = useState(null);
+
+  // Custom-cursor preference (shell, Phase 2): defaults on, persisted
+  // locally, toggled from the header. Guards inside CustomCursor itself
+  // (pointer:fine, prefers-reduced-motion) decide whether it actually
+  // mounts regardless of this preference.
+  const [cursorEnabled, setCursorEnabled] = useState(() => {
+    try {
+      const stored = localStorage.getItem('moneyops-cc-cursor-enabled');
+      return stored === null ? true : stored === 'true';
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('moneyops-cc-cursor-enabled', String(cursorEnabled));
+    } catch {
+      // localStorage unavailable (private mode, etc.) — preference just
+      // won't persist across reloads; the toggle still works this session.
+    }
+  }, [cursorEnabled]);
 
   // Picks which incident to show when nothing has been explicitly selected yet.
   // `ORDER BY detected_at DESC` alone is wrong here: detected_at gets refreshed
@@ -90,6 +114,56 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Background state glow (design brief §4.3): hue follows the highest
+  // severity among currently active incidents — the same `incidents` state
+  // and the same active predicate ('resolved'/'rejected' excluded) already
+  // used everywhere else in the app (Overview, Header, InvestigationView).
+  // No second source of incident truth is created for this.
+  //
+  // Rendered as two stacked glow layers, faded SEQUENTIALLY (see the long
+  // comment above .bg-glow-layer in index.css): the outgoing hue fades
+  // fully to 0 over 600ms, then the incoming hue is swapped in and faded up
+  // over the next 600ms — the two hues are never on-screen together, which
+  // is what actually avoids the muddy magenta midpoint (a simultaneous
+  // two-layer crossfade does not; it alpha-blends the same as RGB
+  // interpolation would). Total budget stays the brief's 1200ms.
+  const activeGlowLayer = useRef('a');
+  useEffect(() => {
+    const active = incidents.filter(i => i.status !== 'resolved' && i.status !== 'rejected');
+    const bySeverity = ['critical', 'high', 'medium', 'low'];
+    const highest = bySeverity.find(sev => active.some(i => i.severity === sev));
+    const hue = highest ? `var(--sev-${highest})` : 'var(--cc-accent)';
+
+    const current = activeGlowLayer.current;
+    const next = current === 'a' ? 'b' : 'a';
+    const currentEl = document.querySelector(`.bg-glow-layer[data-layer="${current}"]`);
+    const nextEl = document.querySelector(`.bg-glow-layer[data-layer="${next}"]`);
+    if (!currentEl || !nextEl) return;
+
+    const currentHue = currentEl.style.getPropertyValue(`--glow-hue-${current}`);
+    if (currentHue === hue) return; // already showing this hue, nothing to do
+
+    const fadeIn = () => {
+      nextEl.style.setProperty(`--glow-hue-${next}`, hue);
+      requestAnimationFrame(() => {
+        nextEl.style.opacity = '0.16';
+      });
+    };
+
+    let fadeInTimer;
+    if (currentHue === '') {
+      // First paint — nothing is showing yet, so there's no outgoing hue to
+      // fade out first. Fade the initial hue straight in.
+      fadeIn();
+    } else {
+      currentEl.style.opacity = '0';
+      fadeInTimer = setTimeout(fadeIn, 600);
+    }
+    activeGlowLayer.current = next;
+
+    return () => { if (fadeInTimer) clearTimeout(fadeInTimer); };
+  }, [incidents]);
+
   const handleSelectAndInvestigate = async (inc) => {
     setSelectedIncident(inc);
     try {
@@ -122,7 +196,7 @@ export default function App() {
   };
 
   return (
-    <div className="app-container" style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
+    <div className="app-container" style={{ minHeight: "100vh", background: "transparent", color: "var(--text)" }}>
       
       {/* 1. TOP HEADER & 4-VIEW NAVIGATION */}
       {/* Single source of truth: an incident's own `status` field ('open' vs
@@ -146,7 +220,12 @@ export default function App() {
         pendingInvestigationCount={incidents.filter(i => i.status !== 'resolved' && i.status !== 'rejected').length}
         investigatedCount={incidents.filter(i => i.status === 'resolved' || i.status === 'rejected').length}
         onRefresh={loadData}
+        cursorEnabled={cursorEnabled}
+        onToggleCursor={() => setCursorEnabled(v => !v)}
       />
+
+      <RouteProgress routeKey={activeTab} />
+      <CustomCursor enabled={cursorEnabled} />
 
       {/* 2. GLOBAL NOTIFICATION BANNER */}
       {notification && (
@@ -174,38 +253,40 @@ export default function App() {
 
       {/* 3. PRIMARY WORKSPACE CONTAINER */}
       <main style={{ maxWidth: "1600px", margin: "0 auto", padding: "24px" }}>
-        {activeTab === 'overview' && (
-          <OverviewView
-            stats={stats}
-            sourceStats={sourceStats}
-            incidents={incidents}
-            onSelectIncident={handleSelectAndInvestigate}
-            onTriggerDetection={handleTriggerDetection}
-            isDetecting={isDetecting}
-          />
-        )}
+        <PageTransition routeKey={activeTab}>
+          {activeTab === 'overview' && (
+            <OverviewView
+              stats={stats}
+              sourceStats={sourceStats}
+              incidents={incidents}
+              onSelectIncident={handleSelectAndInvestigate}
+              onTriggerDetection={handleTriggerDetection}
+              isDetecting={isDetecting}
+            />
+          )}
 
-        {activeTab === 'data' && (
-          <DataView onRefreshAll={loadData} />
-        )}
+          {activeTab === 'data' && (
+            <DataView onRefreshAll={loadData} />
+          )}
 
-        {activeTab === 'investigation' && (
-          <InvestigationView
-            incident={selectedIncident}
-            incidents={incidents}
-            onSelectIncident={handleSelectAndInvestigate}
-            aiStatus={aiStatus}
-            onRefreshAll={loadData}
-          />
-        )}
+          {activeTab === 'investigation' && (
+            <InvestigationView
+              incident={selectedIncident}
+              incidents={incidents}
+              onSelectIncident={handleSelectAndInvestigate}
+              aiStatus={aiStatus}
+              onRefreshAll={loadData}
+            />
+          )}
 
-        {activeTab === 'copilot' && (
-          <FinancialCopilotView incidents={incidents} onSelectIncident={handleSelectAndInvestigate} />
-        )}
+          {activeTab === 'copilot' && (
+            <FinancialCopilotView incidents={incidents} onSelectIncident={handleSelectAndInvestigate} />
+          )}
 
-        {activeTab === 'audit' && (
-          <AuditView />
-        )}
+          {activeTab === 'audit' && (
+            <AuditView />
+          )}
+        </PageTransition>
       </main>
 
 

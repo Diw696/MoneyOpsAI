@@ -1,47 +1,425 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;550;600;650&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
 :root {
-  --bg-main: #0a0c10;
-  --bg-card: #12151b;
-  --bg-card-hover: #171b23;
-  --bg-surface: #12151b;
-  --bg-accent: rgba(99, 102, 241, 0.06);
+  /* ===========================================================================
+     LEGACY TOKENS — kept as names (176+ existing var() references across every
+     component depend on them) but every VALUE below is now an alias onto the
+     --cc-* ramp defined further down this same block, not an independent hex.
+     One source of truth: change a --cc-* value and every legacy-named
+     consumer follows automatically. See the mapping table comment above the
+     --cc-* section for the reasoning behind each alias.
+     =========================================================================== */
+  --bg-main: var(--ink-page);
+  --bg-card: var(--ink-base);
+  --bg-card-hover: var(--ink-hover);
+  --bg-surface: var(--ink-base);
+  --bg-accent: rgba(76, 111, 255, 0.06); /* --cc-accent's RGB at low opacity — unused by any component today, aliased for consistency */
 
-  --border-subtle: rgba(255, 255, 255, 0.07);
-  --border-hover: rgba(255, 255, 255, 0.14);
-  --border-accent: rgba(99, 102, 241, 0.28);
+  --border-subtle: var(--line-hair);
+  --border-hover: var(--line-solid);
+  --border-accent: var(--cc-accent-dim);
 
-  --text-primary: #e8eaed;
-  --text-secondary: #9aa1ad;
-  --text-muted: #7a828f;
-  --text-accent: #93c5fd;
+  --text-primary: var(--cc-text-primary);
+  --text-secondary: var(--cc-text-secondary);
+  --text-muted: var(--cc-text-tertiary);
+  --text-accent: var(--cc-accent); /* unused by any component today; see mapping notes */
 
-  --color-brand: #6366f1;
-  --color-brand-glow: rgba(99, 102, 241, 0.2);
-  --color-critical: #ef4444;
-  --color-critical-glow: rgba(239, 68, 68, 0.18);
-  --color-warning: #f59e0b;
-  --color-warning-glow: rgba(245, 158, 11, 0.16);
-  --color-success: #10b981;
-  --color-success-glow: rgba(16, 185, 129, 0.16);
-  --color-cyan: #06b6d4;
-  --color-purple: #a855f7;
+  --color-brand: var(--cc-accent);
+  --color-brand-glow: rgba(76, 111, 255, 0.2); /* unused; --cc-accent at low opacity */
+  --color-critical: var(--sev-critical);
+  --color-critical-glow: rgba(255, 77, 94, 0.18); /* unused; --sev-critical at low opacity */
+  --color-warning: var(--state-pending);
+  --color-warning-glow: rgba(245, 194, 66, 0.16); /* unused; --state-pending at low opacity */
+  --color-success: var(--state-verified);
+  --color-success-glow: rgba(41, 211, 153, 0.16); /* unused; --state-verified at low opacity */
+  --color-cyan: #06b6d4; /* NO CLEAN EQUIVALENT — see mapping notes; left as its original literal, unused */
+  --color-purple: #a855f7; /* NO CLEAN EQUIVALENT — see mapping notes; left as its original literal, unused */
 
-  /* Aliases actually referenced throughout component inline styles — these were
-     previously UNDEFINED (every var(--bg)/var(--surface)/var(--border)/
-     var(--primary)/var(--text) in the app silently fell back to inherited body
-     color via invalid-custom-property behavior, which is why the UI had no real
-     design-token control despite looking superficially consistent). Defining
-     them here is the single highest-leverage fix for visual coherence: every
-     card, border, and text color in the app resolves through these tokens. */
+  /* Aliases actually referenced throughout component inline styles (--bg 2x,
+     --surface 7x, --border 50x, --primary 34x, --text 88x as of this phase) —
+     now resolve through the legacy names above straight into the --cc-* ramp. */
   --bg: var(--bg-main);
   --surface: var(--bg-card);
   --border: var(--border-subtle);
   --primary: var(--color-brand);
   --text: var(--text-primary);
 
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-sans: 'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: var(--cc-font-data); /* true alias, not an independent duplicate of the same string */
+
+  /* ===========================================================================
+     "CHAIN OF CUSTODY" TOKEN SET — Phase 1 of the redesign brief.
+     Added alongside the tokens above, not replacing them: every existing page
+     (Overview/Data/Investigation/Audit/Copilot) still renders through the
+     original --bg/--surface/--border/--primary/--text/.card/.btn/.badge
+     system above, so this phase is a pure addition with zero visual change to
+     any current page except the sitewide font swap (Inter -> Instrument Sans,
+     JetBrains Mono -> IBM Plex Mono, both applied above). Components adopt
+     these new tokens as each is rebuilt in its own later phase.
+     =========================================================================== */
+
+  /* --- Surface ramp (cool ink) --- */
+  --ink-page: #080B0E;
+  --ink-base: #0C1116;
+  --ink-raised: #121A21;
+  --ink-hover: #18232C;
+  --ink-sunken: #060809;
+
+  --line-hair: #1C262F;
+  --line-solid: #2A3742;
+  --line-focus: #3F5566;
+
+  /* --- Text ramp ---
+     --cc-text-tertiary is adjusted from the brief's literal #5F7180: computed
+     WCAG contrast against --ink-base is 3.76:1, which fails the brief's own
+     stated 4.5:1 floor for this pair. #6D7F8E clears it at 4.58:1 — the only
+     color value in this token set changed from the brief's literal spec, and
+     changed for the exact reason (and using the exact rule) the brief names. */
+  --cc-text-primary: #E8EEF3;
+  --cc-text-secondary: #94A5B4;
+  --cc-text-tertiary: #6D7F8E;
+  --cc-text-disabled: #3B4854;
+
+  /* --- Semantic color --- */
+  --sev-critical: #FF4D5E;
+  --sev-high: #FF8A3D;
+  --sev-medium: #F5C242;
+  --sev-low: #6B8A9E;
+
+  --state-verified: #29D399;
+  --state-pending: #F5C242;
+  --state-rejected: #6E7C89;
+
+  --cc-accent: #4C6FFF;
+  --cc-accent-dim: #2C3F8F;
+
+  /* --- Provenance texture ---
+     Phase 5 (Data page): bumped from the Phase 1 literal (0.022 alpha, 1px
+     stripe) after live verification at 1440px showed it was imperceptible
+     during normal viewing — only barely visible at 3x zoom. Widened the
+     stripe and roughly doubled the alpha; still reads as a faint diagonal
+     grain, not a repeating pattern someone would consciously read. */
+  --hatch-simulated: repeating-linear-gradient(
+    45deg,
+    transparent 0 4px,
+    rgba(255, 255, 255, 0.05) 4px 6px
+  );
+
+  /* --- Type faces (distinct names from --font-sans/--font-mono above, which
+     already carry the site's actual font swap) so later phases can opt into
+     the type-scale utility classes below explicitly. --- */
+  --cc-font-ui: 'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --cc-font-data: 'IBM Plex Mono', ui-monospace, monospace;
+
+  /* --- Space / radius / elevation --- */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 14px;
+  --r-full: 999px;
+  --shadow-float: 0 24px 60px -12px rgba(0, 0, 0, 0.7);
+
+  /* --- Motion --- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-snap: cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  --dur-instant: 90ms;
+  --dur-fast: 160ms;
+  --dur-base: 260ms;
+  --dur-slow: 420ms;
+}
+
+/* Reduced motion — collapses every transition/animation across both the
+   original token system and the new one. Nothing disappears: it's a duration
+   floor, not a display:none, so content that depends on an animation to
+   appear (e.g. a fade-in) still ends up visible, just without the motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --- Type scale utility classes (brief §2.5) — later phases apply these by
+   class instead of repeating font-size/weight/face per component. Unused by
+   any current page yet; additive only. --- */
+.text-hero {
+  font-family: var(--cc-font-data);
+  font-size: 56px;
+  line-height: 1.0;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.text-page-title {
+  font-family: var(--cc-font-ui);
+  font-size: 28px;
+  line-height: 1.2;
+  font-weight: 600;
+}
+.text-card-title {
+  font-family: var(--cc-font-ui);
+  font-size: 17px;
+  line-height: 1.35;
+  font-weight: 550;
+}
+.text-body {
+  font-family: var(--cc-font-ui);
+  font-size: 14px;
+  line-height: 1.55;
+  font-weight: 400;
+  max-width: 72ch;
+}
+.text-metric {
+  font-family: var(--cc-font-data);
+  font-size: 22px;
+  line-height: 1.1;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+.text-label {
+  font-family: var(--cc-font-ui);
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 450;
+  color: var(--cc-text-tertiary);
+}
+.text-data {
+  font-family: var(--cc-font-data);
+  font-size: 12.5px;
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--cc-text-tertiary);
+  letter-spacing: 0.01em;
+}
+
+/* Tabular figures + slashed zero everywhere a number can appear, so an
+   incident ID's 0 is never mistaken for an O and money never jitters
+   between rows. */
+[class*="text-"], .cc-numeric {
+  font-variant-numeric: tabular-nums;
+}
+.text-hero, .text-metric, .text-data, .cc-numeric {
+  font-feature-settings: "ss02", "zero";
+}
+
+/* --- Elevation --- the only two elevation devices in the new system: a
+   tint+inset-highlight for panels, and one real shadow reserved for
+   floating layers (command palette, drawer, tooltip) in a later phase. */
+.raised {
+  background: var(--ink-raised);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-hair);
+}
+
+/* --- Background layers (brief §4) — four fixed layers mounted once as
+   static markup in index.html (#bg-layers). The glow is two stacked layers
+   (see .bg-glow-layer below) cross-faded by App.jsx based on the highest
+   active incident severity, defaulting to --cc-accent (the "clear" state)
+   when nothing is active. */
+#bg-layers {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  /* Fixes a real, confirmed Chromium quirk: document.body.scrollWidth
+     includes the layout footprint of position:absolute descendants
+     (.bg-glow-layer is 900px wide, centered) even though this element's
+     own overflow:hidden visually clips them — overflow-x:hidden on body
+     does NOT change scrollWidth's reported value either, since scrollWidth
+     measures content extent independent of the overflow property. CSS
+     containment is the actual fix: it tells the browser this element's
+     internal layout/paint can never affect anything outside its own box,
+     which is what stops the descendant's size from leaking into
+     document.body.scrollWidth. Confirmed via live measurement: 24px phantom
+     overflow on Overview at 390px (the one page tall enough to force a
+     vertical scrollbar, which is what triggers the quirk) before this,
+     zero after. */
+  contain: layout paint;
+}
+
+.bg-floor {
+  position: absolute;
+  inset: 0;
+  background: var(--ink-page);
+}
+
+.bg-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+  background-size: 28px 28px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 55% at 50% 0%, black 0%, black 40%, transparent 75%);
+  mask-image: radial-gradient(ellipse 70% 55% at 50% 0%, black 0%, black 40%, transparent 75%);
+}
+
+/* Two stacked glow layers, faded SEQUENTIALLY (never simultaneously) by
+   App.jsx rather than animating a single layer's color channel or
+   cross-fading both layers' opacity at once. Two fixes were tried and
+   rejected before this one:
+     1. Animating --glow-hue's color value directly (RGB interpolation)
+        between e.g. --sev-critical #FF4D5E and --cc-accent #4C6FFF passes
+        through a muddy, undefined magenta/purple midpoint.
+     2. A simultaneous two-layer opacity crossfade (both layers ramping at
+        once) does NOT avoid this: two different-hued, semi-transparent,
+        identically-positioned layers visible at the same time still
+        alpha-blend into the same muddy purple in their overlap — confirmed
+        visually, not just assumed.
+   The only clean fix is to make sure the two hues are never on-screen
+   together: fade the outgoing hue fully to 0 first, THEN swap in and fade
+   the incoming hue up from 0. App.jsx splits the brief's 1200ms budget into
+   two sequential 600ms legs to do this. */
+.bg-glow-layer {
+  position: absolute;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  /* width: min(900px, 100vw) — not a flat 900px — because this element's
+     centered, negative-offset footprint (-255px to 645px at a 390px
+     viewport) triggers a confirmed real Chromium bug where
+     document.body.scrollWidth includes a fixed-ancestor's absolutely
+     positioned descendant's full footprint even though the ancestor
+     (#bg-layers) visually clips it via overflow:hidden, and even with
+     `contain: layout paint` added to that ancestor (tried, measured,
+     didn't change the reported scrollWidth). Capping the width here
+     removes the phantom footprint at its source instead of continuing to
+     fight the browser's scrollWidth accounting — it very slightly
+     narrows the glow's horizontal extent on phones, which is invisible
+     in practice since --dur-slow/opacity already keep it extremely
+     subtle. */
+  width: min(900px, 100vw);
+  height: 900px;
+  border-radius: 50%;
+  opacity: 0;
+  filter: blur(40px);
+  /* Each leg is half the brief's 1200ms budget: App.jsx fades the outgoing
+     hue to 0 first, then (only once it's fully gone) fades the incoming hue
+     in — sequential, never simultaneous, so two different hues are never
+     both visible at once. See the comment above .bg-glow-layer for why
+     simultaneous alpha-blending of two colors is the actual problem, not
+     just single-property RGB interpolation. */
+  transition: opacity 600ms var(--ease-inout);
+  pointer-events: none;
+}
+
+.bg-glow-layer[data-layer="a"] {
+  background: radial-gradient(circle, var(--glow-hue-a, var(--cc-accent)) 0%, transparent 70%);
+}
+
+.bg-glow-layer[data-layer="b"] {
+  background: radial-gradient(circle, var(--glow-hue-b, var(--cc-accent)) 0%, transparent 70%);
+}
+
+.bg-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+}
+
+/* Real content sits above the fixed background layers. #root is not
+   otherwise touched — every existing page keeps its own stacking/layout
+   exactly as it was. */
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* --- Custom cursor (Phase 2.1 — reconciled with the original §3.3 table) ---
+   Rendered by CustomCursor.jsx, which only mounts these nodes when JS has
+   confirmed: pointer:fine, no prefers-reduced-motion, and the user hasn't
+   disabled it via the header toggle. The native cursor is hidden ONLY via
+   the .cc-custom-cursor-active class that same component adds to <html>
+   right after mounting — so a guard failure, a disabled toggle, or a JS
+   error all leave the native cursor working, never a blank cursor.
+
+   Sizing, shape, border-radius and position are almost entirely set
+   imperatively per frame in CustomCursor.jsx (that's what "ring snaps to
+   the hovered element's actual bounding box" / "full-width horizontal
+   line" / lerp-follow actually require) — this CSS only supplies base
+   positioning, default appearance, and a transition on the handful of
+   properties that benefit from smoothing between discrete state changes.
+   `transform` is deliberately NOT transitioned here: it's rewritten every
+   animation frame in JS (lerp for the default state, direct snap for
+   hover/row), and a CSS transition on it would fight that and introduce
+   extra lag exactly where the spec calls for zero lag or an exact snap. */
+.cc-cursor-dot,
+.cc-cursor-ring,
+.cc-cursor-crosshair {
+  position: fixed;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 9999;
+  will-change: transform;
+}
+
+/* No margin-based centering here on purpose: the ring needs to be
+   top-left-aligned (not centered) when it snaps to an element's real
+   bounding box in the hover/row states, so CustomCursor.jsx computes the
+   correct centering offset itself, per state, directly in the translate3d
+   it writes every frame. */
+.cc-cursor-dot {
+  width: 5px;
+  height: 5px;
+  margin: 0;
+  border-radius: 50%;
+  background: var(--cc-accent);
+  transition: width var(--dur-fast) var(--ease-out), height var(--dur-fast) var(--ease-out),
+              border-radius var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+}
+
+.cc-cursor-ring {
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  border-radius: 50%;
+  /* Phase 6-Final: was --line-solid (#2A3742), which computes to only a
+     1.62:1 contrast ratio against --ink-page (#080B0E) — real WCAG math,
+     not a guess — meaning the default-state ring was very nearly invisible
+     against the page background outside of hover states. --cc-text-tertiary
+     clears 4.77:1 against the same background (it's the same color already
+     proven legible for muted body text sitewide), so the idle cursor is now
+     actually perceptible without becoming a loud/bright ring. */
+  border: 1px solid var(--cc-text-tertiary);
+  background: rgba(255, 255, 255, 0.02);
+  transition: width var(--dur-fast) var(--ease-snap), height var(--dur-fast) var(--ease-snap),
+              border-radius var(--dur-fast) var(--ease-snap), border-color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+}
+
+/* 18px crosshair (table-row state) — two 1px bars, hidden by default. */
+.cc-cursor-crosshair {
+  background: var(--cc-accent);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.cc-cursor-crosshair-h { width: 18px; height: 1px; }
+.cc-cursor-crosshair-v { width: 1px; height: 18px; }
+
+.cc-cursor-ripple {
+  position: fixed;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1.5px solid var(--cc-accent);
+  pointer-events: none;
+  z-index: 9998;
+}
+
+.cc-custom-cursor-active,
+.cc-custom-cursor-active * {
+  cursor: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-cursor-dot, .cc-cursor-ring, .cc-cursor-crosshair {
+    transition: none !important;
+  }
 }
 
 * {
@@ -50,7 +428,27 @@
   padding: 0;
 }
 
+/* Defensive: on tall pages (Overview, with its full incident list + case
+   memory ledger) that trigger a vertical scrollbar in headless Chromium,
+   #bg-layers (position:fixed; inset:0) measures a few px wider than
+   document.body.clientWidth — a known Chromium quirk where a fixed
+   element's initial containing block can be computed against the
+   pre-scrollbar viewport width. Confirmed live: 0 overflow on every page
+   except Overview, and only once its content was tall enough to actually
+   scroll vertically; nothing inside <main> itself ever exceeded the
+   viewport. #bg-layers is a purely decorative background layer, so
+   clipping horizontally at the html level can only ever remove this
+   phantom overflow, never real content. */
+html {
+  overflow-x: hidden;
+}
+
 body {
+  /* The actual fix: document.body.scrollWidth (what every overflow check
+     in this project measures) reflects body's OWN intrinsic content
+     extent — clipping only on html, body's ancestor, doesn't change that
+     number. overflow-x: hidden here does. */
+  overflow-x: hidden;
   background-color: var(--bg-main);
   color: var(--text-primary);
   font-family: var(--font-sans);
@@ -58,10 +456,26 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
-  background-image: 
-    radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.06) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.04) 0px, transparent 50%),
-    radial-gradient(at 50% 50%, rgba(6, 182, 212, 0.03) 0px, transparent 60%);
+  /* The old decorative radial-gradient background-image (superseded by
+     #bg-layers, which now paints fully opaque on top of body via its own
+     .bg-floor once .app-container was made transparent) is removed here —
+     it was already fully invisible, and it was the only place --color-cyan/
+     --color-purple were ever referenced (see the Phase 1.5 mapping report:
+     both are NO CLEAN EQUIVALENT in the new palette). Removing it is a
+     genuine dead-code cleanup, not a visible change.
+
+     font-variant-numeric and font-feature-settings are set here, inherited,
+     rather than scoped to the new (currently-unused) .text-* utility
+     classes as Phase 1 mistakenly did — that meant tabular-nums never
+     actually applied to any real rendered number. Declaring it on body
+     applies it to every number in the app today, with zero component
+     changes, exactly matching the brief's "Global" instruction. The ss02/
+     zero feature tags are harmless no-ops on Instrument Sans (the current
+     body font) and activate automatically the moment any element's
+     computed font becomes IBM Plex Mono — see the Phase 1.5 report for
+     which real elements do/don't use that font yet. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "ss02", "zero";
 }
 
 /* Custom Scrollbars */
@@ -291,4 +705,896 @@ body {
   max-width: 1440px;
   margin: 0 auto;
   padding: 0 24px;
+}
+
+/* ===========================================================================
+   PHASE 3 — PRIMITIVES
+   Built in isolation (see PrimitivesShowcase.jsx, mounted only behind the
+   #showcase hash route — never on a production page this phase). Every rule
+   below resolves through the --cc-* / --r-* / --dur-* / --ease-* tokens
+   already established in Phases 1/1.5/2 — no new palette, no new radius or
+   motion scale. Class names are namespaced cc-* to guarantee zero collision
+   with the existing .btn/.card/.badge system every production page still
+   renders through.
+   =========================================================================== */
+
+/* --- Button --- */
+.cc-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--cc-font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 18px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  overflow: hidden;
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+}
+.cc-btn:disabled {
+  opacity: 0.5;
+}
+.cc-btn:focus-visible {
+  outline: 2px solid var(--cc-accent);
+  outline-offset: 2px;
+}
+
+.cc-btn-primary {
+  background: var(--cc-accent);
+  color: #fff;
+}
+.cc-btn-primary:not(:disabled):hover {
+  background: #5c7bff;
+}
+
+.cc-btn-secondary {
+  background: transparent;
+  border-color: var(--line-solid);
+  color: var(--cc-text-primary);
+}
+.cc-btn-secondary:not(:disabled):hover {
+  border-color: var(--line-focus);
+  background: var(--ink-hover);
+}
+
+.cc-btn-ghost {
+  background: transparent;
+  color: var(--cc-text-secondary);
+}
+.cc-btn-ghost:not(:disabled):hover {
+  color: var(--cc-text-primary);
+  background: var(--ink-hover);
+}
+
+.cc-btn-label {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Phase 3.1: semantic tone for Approve/Reject/Execute-style actions. Never
+   adds a fill — only the border, label, and icon color shift, on ANY tier
+   (including primary) — a destructive/irreversible action being visually as
+   loud as a normal filled primary action is exactly the "giant filled
+   red/critical rectangle" this system avoids. Hover/focus strengthen the
+   same treatment (a stronger border + a faint tint), never introduce a
+   solid fill. Disabled falls through to the base .cc-btn:disabled opacity
+   rule, so a disabled destructive action reads as clearly disabled too. */
+.cc-btn-tone-critical { border-color: var(--sev-critical); color: var(--sev-critical); background: transparent; }
+.cc-btn-tone-critical:not(:disabled):hover { background: rgba(255, 77, 94, 0.1); border-color: var(--sev-critical); }
+.cc-btn-tone-warning { border-color: var(--sev-medium); color: var(--sev-medium); background: transparent; }
+.cc-btn-tone-warning:not(:disabled):hover { background: rgba(245, 194, 66, 0.1); }
+.cc-btn-tone-verified { border-color: var(--state-verified); color: var(--state-verified); background: transparent; }
+.cc-btn-tone-verified:not(:disabled):hover { background: rgba(41, 211, 153, 0.1); }
+/* Even on tier="primary", a tone strips the accent fill back to the same
+   restrained bordered treatment — see the module comment in Button.jsx. */
+.cc-btn-primary.cc-btn-tone-critical,
+.cc-btn-primary.cc-btn-tone-warning,
+.cc-btn-primary.cc-btn-tone-verified {
+  background: transparent;
+}
+
+/* Loading: a compact 12px inline spinner (rotation only, no sweeping rail)
+   + a present-participle label passed explicitly by the consumer. */
+.cc-btn-spinner {
+  flex-shrink: 0;
+  animation: cc-btn-spin 0.7s linear infinite;
+}
+@keyframes cc-btn-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-btn-spinner { animation-duration: 1.4s; }
+}
+
+.cc-btn-check {
+  flex-shrink: 0;
+  animation: cc-btn-success-in var(--dur-base) var(--ease-out);
+}
+.cc-btn-success {
+  background: var(--state-verified) !important;
+  border-color: var(--state-verified) !important;
+  color: #06251b !important;
+}
+@keyframes cc-btn-success-in {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* --- Card + SeverityRail --- */
+.cc-card {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  background: var(--ink-base);
+  border: 1px solid var(--line-hair);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  text-align: left;
+  width: 100%;
+  /* Card's interactive variant renders a real <button> for keyboard access;
+     a <button>'s browser-default color is NOT inherited from the page the
+     way a <div>'s would be, so without this, every unstyled text node
+     inside (like an incident title) silently falls back to the UA
+     "buttontext" system color instead of --cc-text-primary. Found live via
+     screenshot inspection on Overview's incident cards, not assumed. */
+  color: var(--cc-text-primary);
+  font-family: var(--cc-font-ui);
+}
+.cc-card-interactive {
+  /* No `cursor: none` here — the native cursor must only ever be hidden by
+     the global `.cc-custom-cursor-active` rule in the custom-cursor section
+     above, once CustomCursor.jsx has actually confirmed it's mounted. This
+     element just needs its native cursor to read as clickable when the
+     custom cursor is off/unavailable, same as any other real button. */
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.cc-card-interactive:hover {
+  background: var(--ink-hover);
+  border-color: var(--line-solid);
+}
+.cc-card-interactive:focus-visible {
+  outline: 2px solid var(--cc-accent);
+  outline-offset: -2px;
+}
+.cc-card-body {
+  flex: 1;
+  padding: 18px 20px;
+  min-width: 0;
+}
+
+.cc-severity-rail {
+  position: relative;
+  width: 2px; /* Phase 3.1: reconciled from 4px -> 2px; stays a thin
+                 forensic indicator, not a decorative colored border. */
+  flex-shrink: 0;
+  background: var(--line-hair);
+  transition: width var(--dur-fast) var(--ease-out);
+}
+.cc-card:hover .cc-severity-rail,
+.cc-severity-rail:hover {
+  width: 3px; /* Phase 3.1: reconciled from 6px -> 3px */
+}
+.cc-severity-rail-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--rail-hue);
+  transition: height var(--dur-slow) var(--ease-out), background-color var(--dur-slow) var(--ease-inout);
+}
+/* Phase 3.1: the approval drain/recolor is explicitly spec'd at 500ms — a
+   dedicated duration, not the generic --dur-slow token (420ms), so it's
+   written out literally here rather than reusing a nearby-but-different
+   value. Height and background-color both animate, together, over the same
+   500ms — that's what makes the transition read as directional rather than
+   an instant color swap with a coincidentally-animated height. */
+.cc-severity-rail-approved .cc-severity-rail-fill {
+  background: var(--state-verified);
+  transition: height 500ms var(--ease-out), background-color 500ms var(--ease-inout);
+}
+
+/* --- Chip --- */
+.cc-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-hair);
+  background: var(--ink-raised);
+  font-family: var(--cc-font-ui);
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--cc-text-secondary);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.cc-chip-accent {
+  width: 2px;
+  align-self: stretch;
+  border-radius: 1px;
+  background: var(--chip-accent);
+  margin: -3px 0;
+}
+.cc-chip-interactive {
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.cc-chip-interactive:hover {
+  border-color: var(--line-solid);
+  color: var(--cc-text-primary);
+}
+.cc-chip-interactive:focus-visible {
+  outline: 2px solid var(--cc-accent);
+  outline-offset: 1px;
+}
+
+/* --- Metric --- */
+.cc-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cc-metric-label {
+  font-family: var(--cc-font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cc-text-tertiary);
+}
+.cc-metric-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.cc-metric-value {
+  color: var(--cc-text-primary);
+}
+.cc-metric-delta {
+  font-family: var(--cc-font-data);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.cc-metric-sub {
+  font-family: var(--cc-font-ui);
+  font-size: 12px;
+  color: var(--cc-text-tertiary);
+}
+/* Phase 4: size variants so a page can give one or two metrics real
+   emphasis instead of four identical boxes — hierarchy through scale, not
+   through identical cards with different numbers in them. */
+.cc-metric-lg .cc-metric-value { font-size: 34px; font-weight: 600; }
+.cc-metric-lg .cc-metric-label { font-size: 12px; }
+.cc-metric-sm .cc-metric-value { font-size: 18px; }
+
+/* --- SegmentedControl --- */
+.cc-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--ink-raised);
+  border: 1px solid var(--line-hair);
+  border-radius: var(--r-md);
+}
+.cc-segmented-option {
+  position: relative;
+  padding: 6px 14px;
+  border-radius: var(--r-sm);
+  border: none;
+  background: transparent;
+  color: var(--cc-text-tertiary);
+  font-family: var(--cc-font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.cc-segmented-option[aria-checked="true"] {
+  color: var(--cc-text-primary);
+}
+.cc-segmented-option:focus-visible {
+  outline: 2px solid var(--cc-accent);
+  outline-offset: 1px;
+}
+.cc-segmented-active {
+  position: absolute;
+  inset: 0;
+  background: var(--ink-hover);
+  border: 1px solid var(--line-solid);
+  border-radius: var(--r-sm);
+  z-index: -1;
+}
+.cc-segmented-label {
+  position: relative;
+  z-index: 1;
+}
+
+/* --- Skeleton --- */
+.cc-skeleton,
+.cc-skeleton-line {
+  position: relative;
+  background: var(--ink-raised);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.cc-skeleton-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cc-skeleton-line {
+  height: 12px;
+}
+.cc-skeleton::after,
+.cc-skeleton-line::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
+  animation: cc-skeleton-shimmer 1.6s var(--ease-inout) infinite;
+}
+@keyframes cc-skeleton-shimmer {
+  100% { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-skeleton::after,
+  .cc-skeleton-line::after {
+    animation: none;
+    display: none;
+  }
+}
+
+/* --- Toast --- */
+.cc-toast-stack {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.cc-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 340px;
+  padding: 9px 10px 9px 12px;
+  border-radius: var(--r-sm);
+  border-left: 2px solid var(--line-solid);
+  background: var(--ink-raised);
+  box-shadow: var(--shadow-float);
+  font-family: var(--cc-font-ui);
+  font-size: 12.5px;
+  color: var(--cc-text-primary);
+}
+.cc-toast-success { border-left-color: var(--state-verified); }
+.cc-toast-error { border-left-color: var(--sev-critical); }
+.cc-toast-info { border-left-color: var(--cc-accent); }
+.cc-toast-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+}
+.cc-toast-success .cc-toast-icon { color: var(--state-verified); }
+.cc-toast-error .cc-toast-icon { color: var(--sev-critical); }
+.cc-toast-info .cc-toast-icon { color: var(--cc-accent); }
+.cc-toast-message {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-toast-dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--cc-text-tertiary);
+  font-size: 10px;
+  padding: 2px;
+}
+.cc-toast-dismiss:hover { color: var(--cc-text-primary); }
+
+/* --- Drawer --- */
+.cc-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 8, 0.6);
+  z-index: 600;
+}
+.cc-drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: min(420px, 92vw);
+  background: var(--ink-base);
+  border-left: 1px solid var(--line-solid);
+  box-shadow: var(--shadow-float);
+  z-index: 601;
+  display: flex;
+  flex-direction: column;
+}
+.cc-drawer-right { right: 0; }
+.cc-drawer-left { left: 0; border-left: none; border-right: 1px solid var(--line-solid); }
+.cc-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line-hair);
+}
+.cc-drawer-title {
+  font-family: var(--cc-font-ui);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--cc-text-primary);
+  margin: 0;
+}
+.cc-drawer-close {
+  background: none;
+  border: 1px solid var(--line-hair);
+  border-radius: var(--r-sm);
+  color: var(--cc-text-tertiary);
+  width: 26px;
+  height: 26px;
+  font-size: 11px;
+}
+.cc-drawer-close:hover { color: var(--cc-text-primary); border-color: var(--line-solid); }
+.cc-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+}
+
+/* --- Showcase-only layout (PrimitivesShowcase.jsx, #showcase route) ---
+   Not part of the design system itself — just enough scaffolding to lay the
+   primitives out for review. Never referenced by any production page. */
+.showcase-root {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 24px 80px;
+  color: var(--cc-text-primary);
+  font-family: var(--cc-font-ui);
+}
+.showcase-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 32px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line-hair);
+}
+.showcase-header h1 { font-size: 22px; margin: 0 0 4px; }
+.showcase-header p { font-size: 13px; color: var(--cc-text-tertiary); margin: 0; }
+.showcase-section { margin-bottom: 40px; }
+.showcase-section h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cc-text-secondary);
+  margin: 0 0 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-hair);
+}
+.showcase-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.showcase-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.showcase-note { font-size: 12px; color: var(--cc-text-tertiary); margin: 6px 0 0; }
+.showcase-card-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.showcase-card-sub { font-size: 12px; color: var(--cc-text-tertiary); }
+
+/* Header responsiveness (Phase 4 4.17): below ~1100px there isn't room for
+   branding + all five nav tabs + the full status cluster at once. The nav
+   itself becomes internally scrollable (see Header.jsx's nav style); this
+   only trims the status cluster's text down to just its colored dots, since
+   that's the least essential information in the header at a glance. */
+@media (max-width: 1100px) {
+  .cc-header-status-text { display: none; }
+}
+/* Below ~640px there still isn't room for five full text labels next to the
+   branding lockup — recompose the nav to icon-only (each icon keeps a
+   native `title` tooltip for the label) rather than leaving it as a
+   part-obscured horizontally-scrolling strip. */
+@media (max-width: 640px) {
+  .cc-nav-label { display: none; }
+}
+
+/* Investigation page (Phase 4 4.17): the workspace sidebar is a fixed 300px
+   column beside the main content on desktop — recomposed to a stacked
+   single column below 900px rather than shrinking the sidebar illegibly
+   thin or letting it force horizontal overflow. */
+@media (max-width: 900px) {
+  .cc-investigation-layout { flex-direction: column; }
+  .cc-investigation-sidebar { width: 100% !important; }
+}
+
+/* ===========================================================================
+   PHASE 4 — shared page composition
+   A small, deliberately short set of layout primitives reused across all
+   five redesigned pages, replacing the "everything is a bordered .card"
+   pattern with whitespace, hairline dividers, and typography doing the
+   hierarchy work instead. Every value still resolves through the existing
+   design tokens established in earlier phases — no new palette.
+   =========================================================================== */
+.cc-page {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  padding-top: 8px;
+}
+.cc-page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 760px;
+}
+.cc-page-header .text-page-title { color: var(--cc-text-primary); }
+.cc-page-desc {
+  font-family: var(--cc-font-ui);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--cc-text-secondary);
+  margin: 0;
+}
+.cc-context-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  font-family: var(--cc-font-ui);
+  font-size: 12.5px;
+  color: var(--cc-text-tertiary);
+}
+.cc-context-line strong { color: var(--cc-text-primary); font-weight: 600; }
+.cc-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-family: var(--cc-font-ui);
+  font-size: 12.5px;
+  color: var(--sev-medium);
+  line-height: 1.5;
+}
+.cc-notice svg { flex-shrink: 0; margin-top: 2px; }
+
+/* A row of Metrics separated by hairline dividers instead of four identical
+   bordered boxes — the "metric band". */
+.cc-metric-band {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 32px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--line-hair);
+}
+.cc-metric-band-divider {
+  align-self: stretch;
+  width: 1px;
+  background: var(--line-hair);
+}
+
+.cc-section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.cc-section-header .text-card-title { margin: 0; }
+.cc-section-eyebrow {
+  font-family: var(--cc-font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cc-text-tertiary);
+  margin: 0 0 4px;
+}
+
+/* Compact history/archive row — a hairline divider between rows, no card,
+   no per-row background — used for resolved incidents, audit entries, etc. */
+.cc-row-list {
+  display: flex;
+  flex-direction: column;
+}
+.cc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--line-hair);
+  flex-wrap: wrap;
+}
+.cc-row:last-child { border-bottom: none; }
+.cc-row-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+.cc-row-title {
+  font-family: var(--cc-font-ui);
+  font-size: 13px;
+  color: var(--cc-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-row-meta {
+  font-family: var(--cc-font-data);
+  font-size: 11.5px;
+  color: var(--cc-text-tertiary);
+  flex-shrink: 0;
+}
+
+/* Minimal inline icon sizing — used with the small restrained SVG icon set
+   replacing decorative emoji. */
+.cc-icon { display: inline-block; vertical-align: -2px; flex-shrink: 0; }
+.cc-mb-8 { margin-bottom: 8px; }
+.cc-mt-14 { margin-top: 14px; }
+
+/* ===========================================================================
+   OVERVIEW — Phase 4 correction pass. Overview-only; no other page reads
+   any of these classes.
+   =========================================================================== */
+
+/* System-state strip — one quiet line of instrument chrome, not a banner. */
+.cc-system-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--cc-font-ui);
+  font-size: 12.5px;
+  color: var(--cc-text-tertiary);
+}
+.cc-system-strip-sep { color: var(--line-solid); }
+
+/* Hero — the one dominant number on the page. */
+.cc-hero {
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--line-hair);
+}
+.cc-hero-label {
+  font-family: var(--cc-font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cc-text-tertiary);
+  margin: 0 0 6px;
+}
+.cc-hero-value {
+  color: var(--cc-text-primary);
+  line-height: 1;
+  /* The actual root cause of a real, confirmed 24px horizontal overflow on
+     narrow viewports: .text-hero's flat 56px font-size needs ~390px to set
+     the real exposure figure (e.g. "₹2,69,810.22") in IBM Plex Mono, but
+     only ~342px is available inside the page's 24px side padding at a
+     390px viewport — genuine text overflow, not a layout bug elsewhere.
+     Fluid font-size instead of a hard breakpoint: scales smoothly down to
+     390px viewports and clamps back to the original 56px everywhere the
+     brief's original 1440px-era spec was verified against. */
+  font-size: clamp(30px, 9vw, 56px);
+}
+.cc-hero-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  margin-top: 14px;
+}
+.cc-hero-active {
+  font-family: var(--cc-font-ui);
+  font-size: 14px;
+  font-weight: 600;
+}
+.cc-hero-quiet {
+  font-family: var(--cc-font-ui);
+  font-size: 12.5px;
+  color: var(--cc-text-tertiary);
+}
+
+/* Incident entry — the whole Card is the click target (see Card's own
+   .cc-card-interactive:hover rule for background/border); this only adds
+   the internal anatomy and the hover-revealed chevron affordance that
+   replaces a repeated "Review" button. */
+.cc-incident-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+.cc-incident-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-family: var(--cc-font-data);
+  font-size: 11px;
+  color: var(--cc-text-tertiary);
+}
+.cc-incident-chevron {
+  color: var(--cc-text-tertiary);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.cc-card-interactive:hover .cc-incident-chevron,
+.cc-card-interactive:focus-visible .cc-incident-chevron {
+  opacity: 1;
+  transform: translateX(0);
+}
+.cc-incident-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 18px;
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--line-hair);
+}
+/* The triggering metric (index 0) keeps Metric's normal full-weight
+   treatment; the remaining three are visually demoted — smaller and
+   secondary-colored — so one metric reads as the reason this card exists
+   and the rest read as supporting context, not four equal facts. */
+.cc-metric-secondary .cc-metric-value { color: var(--cc-text-secondary); font-weight: 500; }
+.cc-metric-secondary .cc-metric-label { color: var(--cc-text-disabled); }
+.cc-incident-signal {
+  margin: 14px 0 0;
+  font-family: var(--cc-font-ui);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--cc-text-tertiary);
+}
+
+/* History rows — quieter than the default .cc-row (used elsewhere for
+   denser lists): more vertical breathing room, muted status text instead
+   of a Chip, so case memory recedes behind the active incidents above it. */
+.cc-row-quiet { padding: 10px 4px; }
+
+/* ===========================================================================
+   DATA — Phase 5. Data-page-only; no other page reads these classes.
+   =========================================================================== */
+
+/* Provenance — two panels of context for the table below, not two peer
+   dashboard cards. The simulated panel carries the provenance hatch
+   texture (established in Phase 1, unused until now) so real-vs-simulated
+   is legible even before reading either panel's label. */
+.cc-provenance {
+  display: flex;
+  align-items: flex-start;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+.cc-provenance-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-width: 260px;
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+}
+.cc-provenance-simulated {
+  background-image: var(--hatch-simulated);
+}
+.cc-provenance-divider {
+  align-self: stretch;
+  width: 1px;
+  background: var(--line-hair);
+}
+.cc-provenance-metrics {
+  display: flex;
+  gap: 26px;
+  flex-wrap: wrap;
+}
+.cc-provenance-note {
+  margin: 0;
+  font-size: 12px;
+}
+.cc-provenance-footnote {
+  margin: -6px 0 0;
+  max-width: 900px;
+  font-family: var(--cc-font-ui);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--cc-text-disabled);
+}
+
+/* Table — the dominant object on the page. Quiet headers, hairline row
+   separators (no per-row card), a hover state, and numeric/mono columns
+   using the established forensic typography system. */
+.cc-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.cc-data-table thead th {
+  text-align: left;
+  padding: 0 14px 10px 0;
+  border-bottom: 1px solid var(--line-hair);
+  font-weight: 600;
+}
+.cc-data-table tbody td {
+  padding: 11px 14px 11px 0;
+  border-bottom: 1px solid var(--line-hair);
+  color: var(--cc-text-primary);
+  white-space: nowrap;
+}
+.cc-data-table tbody tr {
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.cc-data-table tbody tr:hover {
+  background: var(--ink-hover);
+}
+.cc-data-mono { font-family: var(--cc-font-data); }
+.cc-data-primary { color: var(--cc-accent); }
+.cc-data-quiet { color: var(--cc-text-tertiary); }
+.cc-data-amount { text-align: right; font-weight: 600; }
+
+/* ===========================================================================
+   INVESTIGATION — Phase 6-Final. Investigation-page-only.
+   =========================================================================== */
+.cc-evidence-chain {
+  display: flex;
+  flex-direction: column;
+}
+.cc-evidence-item {
+  display: flex;
+  gap: 18px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line-hair);
+}
+.cc-evidence-item:last-child { border-bottom: none; }
+.cc-evidence-index {
+  flex-shrink: 0;
+  color: var(--cc-text-disabled);
+  padding-top: 3px;
+}
+.cc-evidence-label {
+  font-family: var(--cc-font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cc-text-tertiary);
+  margin-bottom: 4px;
+}
+.cc-evidence-value {
+  color: var(--cc-text-primary);
+}
+.cc-evidence-detail {
+  font-family: var(--cc-font-ui);
+  font-size: 12px;
+  color: var(--cc-text-tertiary);
+  margin-top: 2px;
 }

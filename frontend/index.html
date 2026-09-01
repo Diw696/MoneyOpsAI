@@ -7,6 +7,18 @@
     <title>MoneyOps AI — Financial Incident Investigation Platform</title>
   </head>
   <body>
+    <div id="bg-layers" aria-hidden="true">
+      <div class="bg-floor"></div>
+      <div class="bg-grid"></div>
+      <div class="bg-glow-layer" data-layer="a"></div>
+      <div class="bg-glow-layer" data-layer="b"></div>
+      <svg class="bg-grain" width="100%" height="100%">
+        <filter id="cc-grain">
+          <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch" />
+        </filter>
+        <rect width="100%" height="100%" filter="url(#cc-grain)" />
+      </svg>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

@@ -1,32 +1,176 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { LayoutGrid, Database, Search, MessageCircle, ScrollText } from 'lucide-react';
 
-export default function Header({ activeTab, onTabChange, health, stats, aiStatus, pendingInvestigationCount, investigatedCount, onRefresh }) {
+const NAV_ITEMS = [
+  { key: 'overview', Icon: LayoutGrid, label: 'Overview' },
+  { key: 'data', Icon: Database, label: 'Data' },
+  { key: 'investigation', Icon: Search, label: 'Investigation' },
+  { key: 'copilot', Icon: MessageCircle, label: 'Financial Copilot' },
+  { key: 'audit', Icon: ScrollText, label: 'Audit Log' },
+];
+
+// Rolls each digit vertically when the number changes (odometer-style),
+// rather than just swapping the text — this is the "digit roll" the shell
+// brief asks for on the pending-count badge. Framer Motion only, no re-flow
+// of surrounding layout since each digit slot has a fixed width/height.
+function RollingNumber({ value }) {
+  const digits = String(value).split('');
+  return (
+    <span style={{ display: 'inline-flex', fontVariantNumeric: 'tabular-nums' }}>
+      {digits.map((d, i) => (
+        <span key={i} style={{ position: 'relative', display: 'inline-block', height: '1em', width: '0.62em', overflow: 'hidden' }}>
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.span
+              key={d}
+              initial={{ y: 8, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -8, opacity: 0 }}
+              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              style={{ position: 'absolute', left: 0, right: 0 }}
+            >
+              {d}
+            </motion.span>
+          </AnimatePresence>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+// A thin outward-fading ring around the badge — NOT a bounce, NOT a glow —
+// fired only on an actual increase (never on decrease or on first mount).
+function PendingBadge({ count }) {
+  const prevRef = useRef(count);
+  const [pulseKey, setPulseKey] = useState(0);
+
+  useEffect(() => {
+    if (count > prevRef.current) {
+      setPulseKey(k => k + 1);
+    }
+    prevRef.current = count;
+  }, [count]);
+
+  if (count <= 0) return null;
+
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex' }}>
+      <AnimatePresence>
+        {pulseKey > 0 && (
+          <motion.span
+            key={pulseKey}
+            initial={{ opacity: 0.55, scale: 1 }}
+            animate={{ opacity: 0, scale: 1.6 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.6, ease: 'easeOut' }}
+            style={{
+              position: 'absolute', inset: '-2px', borderRadius: '10px',
+              border: '1px solid rgba(239, 68, 68, 0.9)', pointerEvents: 'none'
+            }}
+          />
+        )}
+      </AnimatePresence>
+      <span style={{
+        padding: '1px 6px', borderRadius: '10px', background: '#ef4444', color: '#fff',
+        fontSize: '10px', fontWeight: '800', whiteSpace: 'nowrap',
+        display: 'inline-flex', alignItems: 'center', gap: '3px'
+      }}>
+        <RollingNumber value={count} /> pending
+      </span>
+    </span>
+  );
+}
+
+function NavTab({ item, isActive, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        position: 'relative',
+        padding: '7px 12px',
+        borderRadius: '6px',
+        border: 'none',
+        background: 'transparent',
+        color: isActive ? '#fff' : 'var(--text-muted)',
+        fontSize: '13px',
+        fontWeight: '700',
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+        overflow: 'visible'
+      }}
+    >
+      {isActive && (
+        <motion.span
+          layoutId="nav-active-pill"
+          transition={{ type: 'spring', stiffness: 500, damping: 36 }}
+          style={{ position: 'absolute', inset: 0, background: 'var(--primary)', borderRadius: '6px', zIndex: 0 }}
+        />
+      )}
+      <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: '6px' }} title={item.label}>
+        <item.Icon size={13} strokeWidth={2} />
+        <span className="cc-nav-label">{item.label}</span>
+      </span>
+    </button>
+  );
+}
+
+const CURSOR_PREF_KEY = 'moneyops-cc-cursor-enabled';
+
+export default function Header({
+  activeTab, onTabChange, health, stats, aiStatus,
+  pendingInvestigationCount, investigatedCount, onRefresh,
+  cursorEnabled, onToggleCursor
+}) {
   const isRazorpayConfigured = Boolean(health?.razorpay_configured);
   const isPostgresHealthy = health?.status === 'healthy' || health?.database === 'PostgreSQL';
   const isGeminiConfigured = Boolean(health?.gemini_configured ?? aiStatus?.configured);
   const geminiModel = aiStatus?.model || 'gemini-3.5-flash-lite';
 
+  // Scroll state: 56px -> 48px after 24px of scroll, with a smoother/denser
+  // surface once scrolled (a touch more opaque + a bit more blur) so the
+  // header reads as "lifted" rather than just shrinking. rAF-guarded so this
+  // never fires more than once per frame.
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        setScrolled(window.scrollY > 24);
+        ticking = false;
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   return (
     <header style={{
       borderBottom: '1px solid var(--border)',
-      background: 'rgba(15, 23, 42, 0.95)',
-      backdropFilter: 'blur(12px)',
+      background: scrolled ? 'rgba(10, 14, 18, 0.92)' : 'rgba(15, 23, 42, 0.85)',
+      backdropFilter: scrolled ? 'blur(16px)' : 'blur(10px)',
       position: 'sticky',
       top: 0,
       zIndex: 100,
-      padding: '0 24px'
+      padding: '0 20px',
+      transition: 'background 220ms var(--ease-inout), backdrop-filter 220ms var(--ease-inout), box-shadow 220ms var(--ease-inout)',
+      boxShadow: scrolled ? '0 1px 0 rgba(0,0,0,0.4)' : 'none'
     }}>
       <div style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        height: '64px',
+        height: scrolled ? '48px' : '56px',
         maxWidth: '1600px',
-        margin: '0 auto'
+        margin: '0 auto',
+        transition: 'height 220ms var(--ease-inout)'
       }}>
-        
+
         {/* Left: Branding & Tagline */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0, whiteSpace: 'nowrap' }}>
           <div style={{
             width: '34px',
             height: '34px',
@@ -38,7 +182,8 @@ export default function Header({ activeTab, onTabChange, health, stats, aiStatus
             boxShadow: '0 0 12px rgba(99, 102, 241, 0.4)',
             color: '#fff',
             fontWeight: '800',
-            fontSize: '16px'
+            fontSize: '16px',
+            flexShrink: 0
           }}>
             M
           </div>
@@ -47,190 +192,153 @@ export default function Header({ activeTab, onTabChange, health, stats, aiStatus
               <span style={{ fontSize: '1.1rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#fff' }}>
                 MoneyOps AI
               </span>
-              <span style={{ 
-                fontSize: '10px', 
-                padding: '2px 8px', 
-                borderRadius: '12px', 
-                background: 'rgba(99, 102, 241, 0.15)', 
+              <span style={{
+                fontSize: '10px',
+                padding: '2px 8px',
+                borderRadius: '12px',
+                background: 'rgba(99, 102, 241, 0.15)',
                 color: 'var(--primary)',
                 fontWeight: '700'
               }}>
                 V2
               </span>
             </div>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, fontWeight: 500 }}>
-              Financial Incident Investigator
-            </p>
+            <AnimatePresence initial={false}>
+              {!scrolled && (
+                <motion.p
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.18 }}
+                  style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, fontWeight: 500, overflow: 'hidden' }}
+                >
+                  Financial Incident Investigator
+                </motion.p>
+              )}
+            </AnimatePresence>
           </div>
         </div>
 
-        {/* Middle: 3 Primary Navigation Tabs */}
-        <nav style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(0, 0, 0, 0.25)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-          <button
-            onClick={() => onTabChange('overview')}
-            style={{
-              padding: '7px 18px',
-              borderRadius: '6px',
-              border: 'none',
-              background: activeTab === 'overview' ? 'var(--primary)' : 'transparent',
-              color: activeTab === 'overview' ? '#fff' : 'var(--text-muted)',
-              fontSize: '13px',
-              fontWeight: '700',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              transition: 'all 0.15s ease'
-            }}
-          >
-            <span>📊</span>
-            <span>Overview</span>
-          </button>
-
-          <button
-            onClick={() => onTabChange('data')}
-            style={{
-              padding: '7px 18px',
-              borderRadius: '6px',
-              border: 'none',
-              background: activeTab === 'data' ? 'var(--primary)' : 'transparent',
-              color: activeTab === 'data' ? '#fff' : 'var(--text-muted)',
-              fontSize: '13px',
-              fontWeight: '700',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              transition: 'all 0.15s ease'
-            }}
-          >
-            <span>📦</span>
-            <span>Data</span>
-          </button>
-
-          <button
-            onClick={() => onTabChange('investigation')}
-            title={`${pendingInvestigationCount} active/pending, ${investigatedCount} resolved or rejected (final counts, matching Overview and the Investigation workspace exactly)`}
-            style={{
-              padding: '7px 18px',
-              borderRadius: '6px',
-              border: 'none',
-              background: activeTab === 'investigation' ? 'var(--primary)' : 'transparent',
-              color: activeTab === 'investigation' ? '#fff' : 'var(--text-muted)',
-              fontSize: '13px',
-              fontWeight: '700',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              transition: 'all 0.15s ease'
-            }}
-          >
-            <span>🔍</span>
-            <span>Investigation</span>
-            {pendingInvestigationCount > 0 && (
-              <span style={{
-                padding: '1px 6px',
-                borderRadius: '10px',
-                background: '#ef4444',
-                color: '#fff',
-                fontSize: '10px',
-                fontWeight: '800'
-              }}>
-                {pendingInvestigationCount} pending
-              </span>
-            )}
-            {investigatedCount > 0 && (
-              <span style={{
-                padding: '1px 6px',
-                borderRadius: '10px',
-                background: 'rgba(52, 211, 153, 0.2)',
-                color: '#34d399',
-                fontSize: '10px',
-                fontWeight: '800'
-              }}>
-                {investigatedCount} done
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => onTabChange('copilot')}
-            style={{
-              padding: '7px 18px',
-              borderRadius: '6px',
-              border: 'none',
-              background: activeTab === 'copilot' ? 'var(--primary)' : 'transparent',
-              color: activeTab === 'copilot' ? '#fff' : 'var(--text-muted)',
-              fontSize: '13px',
-              fontWeight: '700',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              transition: 'all 0.15s ease'
-            }}
-          >
-            <span>💬</span>
-            <span>Financial Copilot</span>
-          </button>
-
-          <button
-            onClick={() => onTabChange('audit')}
-            style={{
-              padding: '7px 18px',
-              borderRadius: '6px',
-              border: 'none',
-              background: activeTab === 'audit' ? 'var(--primary)' : 'transparent',
-              color: activeTab === 'audit' ? '#fff' : 'var(--text-muted)',
-              fontSize: '13px',
-              fontWeight: '700',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              transition: 'all 0.15s ease'
-            }}
-          >
-            <span>📝</span>
-            <span>Audit Log</span>
-          </button>
+        {/* Middle: 5 Primary Navigation Tabs.
+            minWidth:0 + overflowX:auto (rather than flexShrink:0) is what
+            keeps this responsive: below ~1024px there isn't room for
+            branding + all five tabs + the status cluster at their natural
+            widths, so the nav becomes an internally-scrollable strip
+            instead of forcing the whole header (and page) wider than the
+            viewport. */}
+        <nav style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(0, 0, 0, 0.25)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border)', flexShrink: 1, minWidth: 0, overflowX: 'auto', whiteSpace: 'nowrap' }}>
+          {NAV_ITEMS.map(item => {
+            if (item.key !== 'investigation') {
+              return (
+                <NavTab
+                  key={item.key}
+                  item={item}
+                  isActive={activeTab === item.key}
+                  onClick={() => onTabChange(item.key)}
+                />
+              );
+            }
+            const isActive = activeTab === 'investigation';
+            return (
+              <button
+                key="investigation"
+                onClick={() => onTabChange('investigation')}
+                title={`${pendingInvestigationCount} active/pending, ${investigatedCount} resolved or rejected (final counts, matching Overview and the Investigation workspace exactly)`}
+                style={{
+                  position: 'relative',
+                  padding: '7px 12px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: isActive ? '#fff' : 'var(--text-muted)',
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+              >
+                {isActive && (
+                  <motion.span
+                    layoutId="nav-active-pill"
+                    transition={{ type: 'spring', stiffness: 500, damping: 36 }}
+                    style={{ position: 'absolute', inset: 0, background: 'var(--primary)', borderRadius: '6px', zIndex: 0 }}
+                  />
+                )}
+                <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Search size={13} strokeWidth={2} />
+                  <span className="cc-nav-label">Investigation</span>
+                  <PendingBadge count={pendingInvestigationCount} />
+                  {investigatedCount > 0 && (
+                    <span style={{
+                      padding: '1px 6px',
+                      borderRadius: '10px',
+                      background: 'rgba(52, 211, 153, 0.2)',
+                      color: '#34d399',
+                      fontSize: '10px',
+                      fontWeight: '800',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {investigatedCount} done
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
         </nav>
 
-
-
         {/* Right: Live Connection Indicators */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          
-          {/* Live status: dot + plain text, no per-item colored box — three of these
-              side by side previously competed for attention as three separate chips. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
             <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isRazorpayConfigured ? '#3b82f6' : '#f59e0b', flexShrink: 0 }}></span>
-            <span>Razorpay: <strong style={{ color: isRazorpayConfigured ? 'var(--text)' : '#fbbf24' }}>{isRazorpayConfigured ? 'Test Mode' : 'Keys Needed'}</strong></span>
+            <span className="cc-header-status-text">Razorpay: <strong style={{ color: isRazorpayConfigured ? 'var(--text)' : '#fbbf24' }}>{isRazorpayConfigured ? 'Test Mode' : 'Keys Needed'}</strong></span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
             <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isPostgresHealthy ? '#10b981' : '#ef4444', flexShrink: 0 }}></span>
-            <span>PostgreSQL: <strong style={{ color: 'var(--text)' }}>{stats?.payments ? `${stats.payments} txs` : (isPostgresHealthy ? 'Connected' : 'Offline')}</strong></span>
+            <span className="cc-header-status-text">PostgreSQL: <strong style={{ color: 'var(--text)' }}>{stats?.payments ? `${stats.payments} txs` : (isPostgresHealthy ? 'Connected' : 'Offline')}</strong></span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
             <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isGeminiConfigured ? '#10b981' : '#f87171', flexShrink: 0 }}></span>
-            <span>Gemini: <strong style={{ color: 'var(--text)' }}>{isGeminiConfigured ? geminiModel : 'Offline'}</strong></span>
+            <span className="cc-header-status-text">Gemini: <strong style={{ color: 'var(--text)' }}>{isGeminiConfigured ? geminiModel : 'Offline'}</strong></span>
           </div>
+
+          {/* Custom-cursor settings toggle — persisted locally; the native
+              cursor remains fully functional whether this is on or off. */}
+          <button
+            onClick={onToggleCursor}
+            title={cursorEnabled ? 'Disable custom cursor' : 'Enable custom cursor'}
+            aria-pressed={cursorEnabled}
+            style={{
+              padding: '6px 8px',
+              borderRadius: '6px',
+              background: cursorEnabled ? 'rgba(76, 111, 255, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid var(--border)',
+              color: cursorEnabled ? 'var(--cc-accent)' : 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '12px',
+              flexShrink: 0
+            }}
+          >
+            ◎
+          </button>
 
           {/* Refresh Button */}
-          <button 
+          <button
             onClick={onRefresh}
             title="Refresh All Data"
             style={{
-              padding: '6px 10px',
+              padding: '6px 8px',
               borderRadius: '6px',
               background: 'rgba(255, 255, 255, 0.03)',
               border: '1px solid var(--border)',
               color: 'var(--text-muted)',
               cursor: 'pointer',
-              fontSize: '12px'
+              fontSize: '12px',
+              flexShrink: 0
             }}
           >
             ↻
@@ -242,3 +350,5 @@ export default function Header({ activeTab, onTabChange, health, stats, aiStatus
     </header>
   );
 }
+
+export { CURSOR_PREF_KEY };

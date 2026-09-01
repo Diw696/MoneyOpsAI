@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Zap, Plus } from 'lucide-react';
 import {
   fetchSourceStats,
   syncRazorpay,
@@ -10,11 +11,35 @@ import {
   fetchIncidentLabRuns,
   triggerAnomalyDetection
 } from '../api';
+import { Metric, Button, Chip, SegmentedControl } from '../primitives';
+
+const TABLE_OPTIONS = [
+  { value: 'payments', label: 'Payments' },
+  { value: 'orders', label: 'Orders' },
+  { value: 'refunds', label: 'Refunds' },
+  { value: 'webhooks', label: 'Webhooks' },
+];
+const SOURCE_OPTIONS = [
+  { value: '', label: 'All sources' },
+  { value: 'razorpay_test', label: 'Real' },
+  { value: 'incident_lab', label: 'Simulated' },
+];
+
+// Source identity is communicated once per row via plain text + a small dot,
+// not a Chip on every cell — a Chip means "this has a useful categorical
+// state," and source here is already established by which provenance panel
+// above the table it belongs to. The one place a Chip earns its keep is
+// STATUS, which genuinely varies row to row (captured/failed, etc.).
+function sourceLabel(src) {
+  if (src === 'razorpay_test') return 'Real';
+  if (src === 'razorpay_webhook') return 'Webhook';
+  return 'Simulated';
+}
 
 export default function DataView({ onRefreshAll }) {
   const [sourceStats, setSourceStats] = useState(null);
-  const [activeTable, setActiveTable] = useState('payments'); // 'payments' | 'orders' | 'refunds' | 'webhooks'
-  const [sourceFilter, setSourceFilter] = useState(''); // '' | 'razorpay_test' | 'incident_lab'
+  const [activeTable, setActiveTable] = useState('payments');
+  const [sourceFilter, setSourceFilter] = useState('');
   const [tableData, setTableData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -73,8 +98,8 @@ export default function DataView({ onRefreshAll }) {
         const newOnes = (det.incidents || []).filter(i => i.incident_id);
         const recordsPhrase = totalRecords ? ` across ${totalRecords.toLocaleString('en-IN')} records` : '';
         outcomeLine = newOnes.length > 0
-          ? `⚠ Detection scan complete — ${newOnes.length} anomal${newOnes.length === 1 ? 'y' : 'ies'} detected${recordsPhrase} (${newOnes.map(i => i.incident_id).join(', ')}).`
-          : `✓ Detection scan complete — no significant anomaly found${recordsPhrase}.`;
+          ? `Detection scan complete — ${newOnes.length} anomal${newOnes.length === 1 ? 'y' : 'ies'} detected${recordsPhrase} (${newOnes.map(i => i.incident_id).join(', ')}).`
+          : `Detection scan complete — no significant anomaly found${recordsPhrase}.`;
       } catch (e) {
         outcomeLine = 'Detection scan could not run after generation — use "Run Anomaly Scan" on Overview.';
       }
@@ -123,22 +148,16 @@ export default function DataView({ onRefreshAll }) {
       if (res.status === 'success') {
         setSyncMsg({
           type: 'success',
-          text: `✓ Synchronized ${res.payments_fetched} payments, ${res.orders_fetched} orders, and ${res.refunds_fetched} refunds from Razorpay Test API. Database updated: ${res.payments_upserted} payments upserted.`
+          text: `Synchronized ${res.payments_fetched} payments, ${res.orders_fetched} orders, and ${res.refunds_fetched} refunds from Razorpay Test API. ${res.payments_upserted} payments upserted.`
         });
       } else if (res.status === 'credentials_required') {
-        setSyncMsg({
-          type: 'warning',
-          text: `⚠️ ${res.message}`
-        });
+        setSyncMsg({ type: 'warning', text: res.message });
       }
       await loadProvenance();
       await loadTableData();
       if (onRefreshAll) onRefreshAll();
     } catch (e) {
-      setSyncMsg({
-        type: 'error',
-        text: `Razorpay sync failed: ${e.message}`
-      });
+      setSyncMsg({ type: 'error', text: `Razorpay sync failed: ${e.message}` });
     } finally {
       setSyncing(false);
     }
@@ -156,363 +175,176 @@ export default function DataView({ onRefreshAll }) {
   const labRefunds = sourceStats?.refunds?.incident_lab || 0;
   const labWebhooks = sourceStats?.webhooks?.incident_lab || 0;
 
-  const formatSourceBadge = (src) => {
-    if (src === 'razorpay_test') {
-      return (
-        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
-          RAZORPAY TEST
-        </span>
-      );
-    }
-    if (src === 'razorpay_webhook') {
-      return (
-        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-          RAZORPAY WEBHOOK
-        </span>
-      );
-    }
-    return (
-      <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
-        INCIDENT LAB
-      </span>
-    );
+  const columnsFor = {
+    payments: ['ID', 'Order', 'Merchant', 'Amount', 'Gateway', 'Status', 'Source', 'Timestamp'],
+    orders: ['ID', 'Merchant', 'Amount', 'Status', 'Source', 'Timestamp'],
+    refunds: ['ID', 'Payment', 'Merchant', 'Amount', 'Status', 'Source', 'Timestamp'],
+    webhooks: ['Event ID', 'Event type', 'Entity', 'Signature', 'Source', 'Timestamp'],
   };
 
   return (
-    <div className="view-container" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      
-      {/* 1. TOP HEADER & SYNC CONTROLS */}
-      <div className="card" style={{ padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-        <div>
-          <h2 style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)', margin: 0 }}>
-            Data Sources & Provenance Ledger
-          </h2>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-            Inspect every financial record in PostgreSQL 18 with explicit provenance separation.
-          </p>
-        </div>
+    <div className="cc-page">
 
-        <button 
-          className="btn btn-primary"
-          onClick={handleSync}
-          disabled={syncing}
-          style={{ padding: '10px 20px', fontWeight: '700', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}
-        >
-          {syncing ? '↻ Contacting Razorpay...' : '⚡ Sync Razorpay'}
-        </button>
+      {/* DATA — quiet page identity */}
+      <div className="cc-page-header" style={{ maxWidth: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '16px' }}>
+        <div style={{ maxWidth: 640 }}>
+          <h1 className="text-page-title">Data</h1>
+          <p className="cc-page-desc">Every financial record in PostgreSQL, with explicit real-vs-simulated provenance.</p>
+        </div>
+        <Button tier="primary" onClick={handleSync} state={syncing ? 'loading' : 'idle'} loadingLabel="Syncing">
+          <Zap size={13} strokeWidth={2} style={{ marginRight: 6 }} />
+          Sync Razorpay
+        </Button>
       </div>
 
       {syncMsg && (
-        <div style={{
-          padding: '12px 16px',
-          borderRadius: '8px',
-          fontSize: '13px',
-          background: syncMsg.type === 'success' ? 'rgba(16, 185, 129, 0.1)' : syncMsg.type === 'warning' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-          border: `1px solid ${syncMsg.type === 'success' ? 'rgba(16, 185, 129, 0.3)' : syncMsg.type === 'warning' ? 'rgba(245, 158, 11, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-          color: syncMsg.type === 'success' ? '#10b981' : syncMsg.type === 'warning' ? '#fbbf24' : '#f87171'
-        }}>
+        <p style={{ margin: 0, fontSize: '12.5px', color: syncMsg.type === 'success' ? 'var(--state-verified)' : syncMsg.type === 'warning' ? 'var(--sev-medium)' : 'var(--sev-critical)' }}>
           {syncMsg.text}
-        </div>
+        </p>
       )}
 
-      {/* 2. EXPLICIT PROVENANCE PURPOSE BANNER & SUMMARY */}
-      <div style={{
-        padding: '12px 18px',
-        borderRadius: '8px',
-        fontSize: '13px',
-        background: 'rgba(99, 102, 241, 0.08)',
-        border: '1px solid rgba(99, 102, 241, 0.25)',
-        color: '#c7d2fe',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '10px'
-      }}>
-        <span style={{ fontSize: '16px' }}>ℹ️</span>
-        <span>
-          <strong>Data Provenance Notice:</strong> Razorpay Test Mode below is real external data — orders are created via Razorpay's live test-mode Orders API (an Order being created does NOT mean a payment was made; no checkout was completed and no money moved). Captured-payment volume stays at this account's real, unpadded state because completing a Checkout requires either a human paying it manually or scripting past Razorpay's own hCaptcha / bot-detection, which this project deliberately does not attempt. Incident Lab below is a synthetic financial event stream generated to reproduce realistic operational conditions that are difficult to safely produce in Razorpay Test Mode — it is not a real Razorpay payment. Both sources persist to the same PostgreSQL database with an immutable, queryable <code>source</code> tag on every row.
-        </span>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
-        
-        {/* Real Razorpay Box */}
-        <div className="card" style={{ padding: '20px 24px', border: '1px solid rgba(59, 130, 246, 0.3)', background: 'rgba(59, 130, 246, 0.02)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>
-              REAL DATA (RAZORPAY TEST MODE)
-            </span>
-
-            <code style={{ fontSize: '11px', color: 'var(--text-muted)' }}>source: razorpay_test / webhook</code>
+      {/* SOURCE / PROVENANCE — two panels distinguished by texture as well
+          as text: the simulated panel carries the provenance hatch
+          (--hatch-simulated, established in Phase 1), the real panel stays
+          flat. Neither is a heavy bordered card competing with the table
+          below — this is context for the table, not a peer section. */}
+      <div className="cc-provenance">
+        <div className="cc-provenance-panel">
+          <p className="cc-section-eyebrow">Real — Razorpay Test Mode</p>
+          <div className="cc-provenance-metrics">
+            <Metric size="sm" label="Orders" value={realOrders} sub="created, not paid" />
+            <Metric size="sm" label="Payments" value={realPayments} sub={`${realPaymentsCaptured} captured`} />
+            <Metric size="sm" label="Refunds" value={realRefunds} />
+            <Metric size="sm" label="Webhooks" value={realWebhooks} />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginTop: '10px' }}>
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>ORDERS</div>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>{realOrders}</div>
-              <div style={{ fontSize: '10px', color: '#fbbf24', marginTop: '2px' }}>created, not paid</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>PAYMENTS</div>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>{realPayments}</div>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>{realPaymentsCaptured} captured</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>REFUNDS</div>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>{realRefunds}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>WEBHOOKS</div>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>{realWebhooks}</div>
-            </div>
-          </div>
-
           {detectionVolume && !detectionVolume.razorpay_test_sufficient_for_detection && (
-            <div style={{ marginTop: '14px', padding: '8px 12px', borderRadius: '6px', background: 'rgba(251, 191, 36, 0.08)', border: '1px solid rgba(251, 191, 36, 0.25)', fontSize: '11.5px', color: '#fbbf24' }}>
-              Razorpay Test Mode: {detectionVolume.razorpay_test_payment_count} payment attempt{detectionVolume.razorpay_test_payment_count === 1 ? '' : 's'} — insufficient volume for reliable anomaly detection (needs {detectionVolume.min_sample_size}+). No incidents are raised from this data below that floor.
-            </div>
+            <p className="cc-provenance-note" style={{ color: 'var(--sev-medium)' }}>
+              {detectionVolume.razorpay_test_payment_count} payment attempt{detectionVolume.razorpay_test_payment_count === 1 ? '' : 's'} — intentionally below the {detectionVolume.min_sample_size}+ threshold used for reliable detection.
+            </p>
           )}
         </div>
 
-        {/* Incident Lab Simulation Box */}
-        <div className="card" style={{ padding: '20px 24px', border: '1px solid rgba(168, 85, 247, 0.3)', background: 'rgba(168, 85, 247, 0.02)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
-            <span style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc' }}>
-              SIMULATION (INCIDENT LAB)
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <code style={{ fontSize: '11px', color: 'var(--text-muted)' }}>source: incident_lab</code>
-              <button
-                onClick={handleGenerateLab}
-                disabled={generatingLab}
-                title="Ingests a new batch of realistic synthetic financial activity — appended to PostgreSQL, never replacing prior batches. Most batches are normal; some contain a coherent incident."
-                style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid rgba(168, 85, 247, 0.4)', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', fontSize: '11.5px', fontWeight: '700', cursor: generatingLab ? 'default' : 'pointer' }}
-              >
-                {generatingLab ? '↻ Generating...' : '+ Generate New Data'}
-              </button>
-            </div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginTop: '10px' }}>
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>ORDERS</div>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>{labOrders}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>PAYMENTS</div>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>{labPayments}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>REFUNDS</div>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>{labRefunds}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>WEBHOOKS</div>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>{labWebhooks}</div>
-            </div>
-          </div>
+        <div className="cc-provenance-divider" />
 
+        <div className="cc-provenance-panel cc-provenance-simulated">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <p className="cc-section-eyebrow" style={{ margin: 0 }}>Simulated — Incident Lab</p>
+            <Button tier="ghost" onClick={handleGenerateLab} state={generatingLab ? 'loading' : 'idle'} loadingLabel="Generating">
+              <Plus size={12} strokeWidth={2} style={{ marginRight: 4 }} />
+              Generate new data
+            </Button>
+          </div>
+          <div className="cc-provenance-metrics">
+            <Metric size="sm" label="Orders" value={labOrders} />
+            <Metric size="sm" label="Payments" value={labPayments} />
+            <Metric size="sm" label="Refunds" value={labRefunds} />
+            <Metric size="sm" label="Webhooks" value={labWebhooks} />
+          </div>
           {labMsg && (
-            <div style={{ marginTop: '12px', padding: '8px 12px', borderRadius: '6px', fontSize: '11.5px', background: labMsg.type === 'success' ? 'rgba(52, 211, 153, 0.08)' : 'rgba(248, 113, 113, 0.08)', border: `1px solid ${labMsg.type === 'success' ? 'rgba(52, 211, 153, 0.25)' : 'rgba(248, 113, 113, 0.25)'}`, color: labMsg.type === 'success' ? '#34d399' : '#f87171' }}>
+            <p className="cc-provenance-note" style={{ color: labMsg.type === 'success' ? 'var(--state-verified)' : 'var(--sev-critical)' }}>
               {labMsg.text}
-            </div>
+            </p>
           )}
-
           {labRuns.length > 0 && (
-            <div style={{ marginTop: '14px' }}>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '6px' }}>Recent generation runs (reproducible by seed)</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                {labRuns.map((r) => (
-                  <div key={r.run_id} style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <span style={{ color: '#c084fc' }}>seed={r.seed}</span>
-                    <span>{r.anomaly_type}</span>
-                    {r.target_entity_id && <span>→ {r.target_entity_id}</span>}
-                    <span>({r.anomalous_events_count} anomalous)</span>
-                  </div>
-                ))}
-              </div>
+            <div style={{ marginTop: '10px' }}>
+              {labRuns.map((r) => (
+                <div key={r.run_id} className="text-data" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--cc-text-secondary)' }}>seed={r.seed}</span>
+                  <span>{r.anomaly_type}</span>
+                  {r.target_entity_id && <span>→ {r.target_entity_id}</span>}
+                  <span>({r.anomalous_events_count} anomalous)</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
-
       </div>
 
-      {/* 3. CLEAN READABLE TABLES */}
-      <div className="card" style={{ padding: '24px' }}>
-        
-        {/* Table Tab Selector & Filter */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            {['payments', 'orders', 'refunds', 'webhooks'].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTable(tab)}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  border: activeTable === tab ? '1px solid var(--primary)' : '1px solid var(--border)',
-                  background: activeTable === tab ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
-                  color: activeTable === tab ? 'var(--primary)' : 'var(--text-muted)',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  textTransform: 'capitalize'
-                }}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
+      <p className="cc-provenance-footnote">
+        Orders below are created via Razorpay's live test-mode Orders API — an order being created does not mean a payment
+        was made. Captured-payment volume stays at this account's real, unpadded state. Incident Lab data is a synthetic
+        financial event stream, not a real Razorpay payment. Both sources persist to the same PostgreSQL database with an
+        immutable, queryable <span className="text-data" style={{ color: 'inherit' }}>source</span> tag on every row.
+      </p>
 
+      {/* VIEW CONTROL + DATASET + TABLE */}
+      <section>
+        <div className="cc-section-header" style={{ alignItems: 'center' }}>
+          <SegmentedControl label="Table" value={activeTable} onChange={setActiveTable} options={TABLE_OPTIONS} />
           {activeTable !== 'webhooks' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Filter Source:</span>
-              <select
-                value={sourceFilter}
-                onChange={(e) => setSourceFilter(e.target.value)}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
-                  color: 'var(--text)',
-                  fontSize: '12px'
-                }}
-              >
-                <option value="">All Sources</option>
-                <option value="razorpay_test">Real (razorpay_test)</option>
-                <option value="incident_lab">Simulation (incident_lab)</option>
-              </select>
-            </div>
+            <SegmentedControl label="Source filter" value={sourceFilter} onChange={setSourceFilter} options={SOURCE_OPTIONS} />
           )}
         </div>
 
-        {/* Table Rows */}
+        <p className="cc-section-eyebrow" style={{ marginBottom: '10px' }}>
+          {loading ? 'Loading…' : `${tableData.length} ${activeTable}${sourceFilter ? ` · ${sourceFilter === 'razorpay_test' ? 'real only' : 'simulated only'}` : ''}`}
+        </p>
+
         {loading ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-            <span className="spinner"></span> Loading {activeTable} from PostgreSQL...
+          <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--cc-text-tertiary)', fontSize: '13px' }}>
+            Loading {activeTable} from PostgreSQL…
           </div>
         ) : tableData.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+          <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--cc-text-tertiary)', fontSize: '13px' }}>
             Zero {activeTable} records found for the selected filter.
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+            <table className="cc-data-table">
               <thead>
-                <tr style={{ borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--text-muted)' }}>
-                  {activeTable === 'payments' && (
-                    <>
-                      <th style={{ padding: '10px 12px' }}>ID</th>
-                      <th style={{ padding: '10px 12px' }}>ORDER</th>
-                      <th style={{ padding: '10px 12px' }}>MERCHANT</th>
-                      <th style={{ padding: '10px 12px' }}>AMOUNT</th>
-                      <th style={{ padding: '10px 12px' }}>GATEWAY</th>
-                      <th style={{ padding: '10px 12px' }}>STATUS</th>
-                      <th style={{ padding: '10px 12px' }}>SOURCE</th>
-                      <th style={{ padding: '10px 12px' }}>TIMESTAMP</th>
-                    </>
-                  )}
-                  {activeTable === 'orders' && (
-                    <>
-                      <th style={{ padding: '10px 12px' }}>ID</th>
-                      <th style={{ padding: '10px 12px' }}>MERCHANT</th>
-                      <th style={{ padding: '10px 12px' }}>AMOUNT</th>
-                      <th style={{ padding: '10px 12px' }}>STATUS</th>
-                      <th style={{ padding: '10px 12px' }}>SOURCE</th>
-                      <th style={{ padding: '10px 12px' }}>TIMESTAMP</th>
-                    </>
-                  )}
-                  {activeTable === 'refunds' && (
-                    <>
-                      <th style={{ padding: '10px 12px' }}>ID</th>
-                      <th style={{ padding: '10px 12px' }}>PAYMENT</th>
-                      <th style={{ padding: '10px 12px' }}>MERCHANT</th>
-                      <th style={{ padding: '10px 12px' }}>AMOUNT</th>
-                      <th style={{ padding: '10px 12px' }}>STATUS</th>
-                      <th style={{ padding: '10px 12px' }}>SOURCE</th>
-                      <th style={{ padding: '10px 12px' }}>TIMESTAMP</th>
-                    </>
-                  )}
-                  {activeTable === 'webhooks' && (
-                    <>
-                      <th style={{ padding: '10px 12px' }}>EVENT ID</th>
-                      <th style={{ padding: '10px 12px' }}>EVENT TYPE</th>
-                      <th style={{ padding: '10px 12px' }}>ENTITY</th>
-                      <th style={{ padding: '10px 12px' }}>SIGNATURE</th>
-                      <th style={{ padding: '10px 12px' }}>SOURCE</th>
-                      <th style={{ padding: '10px 12px' }}>TIMESTAMP</th>
-                    </>
-                  )}
+                <tr>
+                  {columnsFor[activeTable].map(col => (
+                    <th key={col} className="cc-section-eyebrow" style={col === 'Amount' ? { textAlign: 'right' } : undefined}>{col}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {tableData.map((row, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', color: 'var(--text)' }}>
+                  <tr key={idx}>
                     {activeTable === 'payments' && (
                       <>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--primary)' }}>{row.payment_id}</td>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>{row.order_id}</td>
-                        <td style={{ padding: '10px 12px' }}>{row.merchant_id}</td>
-                        <td style={{ padding: '10px 12px', fontWeight: '600' }}>₹{Number(row.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                        <td style={{ padding: '10px 12px' }}>{row.gateway}</td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <span style={{ 
-                            padding: '2px 6px', 
-                            borderRadius: '4px', 
-                            fontSize: '11px', 
-                            fontWeight: '600',
-                            background: row.status === 'captured' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                            color: row.status === 'captured' ? '#10b981' : '#f87171'
-                          }}>
-                            {row.status}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>{formatSourceBadge(row.source)}</td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{new Date(row.created_at).toLocaleString()}</td>
+                        <td className="cc-data-mono cc-data-primary">{row.payment_id}</td>
+                        <td className="cc-data-mono">{row.order_id}</td>
+                        <td>{row.merchant_id}</td>
+                        <td className="cc-numeric cc-data-amount">₹{Number(row.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                        <td className="cc-data-quiet">{row.gateway}</td>
+                        <td><Chip tone={row.status === 'captured' ? 'verified' : 'critical'}>{row.status}</Chip></td>
+                        <td className="cc-data-quiet">{sourceLabel(row.source)}</td>
+                        <td className="text-data cc-data-quiet">{new Date(row.created_at).toLocaleString()}</td>
                       </>
                     )}
 
                     {activeTable === 'orders' && (
                       <>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--primary)' }}>{row.order_id}</td>
-                        <td style={{ padding: '10px 12px' }}>{row.merchant_id}</td>
-                        <td style={{ padding: '10px 12px', fontWeight: '600' }}>₹{Number(row.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: '600', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
-                            {row.status}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>{formatSourceBadge(row.source)}</td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{new Date(row.created_at).toLocaleString()}</td>
+                        <td className="cc-data-mono cc-data-primary">{row.order_id}</td>
+                        <td>{row.merchant_id}</td>
+                        <td className="cc-numeric cc-data-amount">₹{Number(row.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                        <td><Chip tone="verified">{row.status}</Chip></td>
+                        <td className="cc-data-quiet">{sourceLabel(row.source)}</td>
+                        <td className="text-data cc-data-quiet">{new Date(row.created_at).toLocaleString()}</td>
                       </>
                     )}
 
                     {activeTable === 'refunds' && (
                       <>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--primary)' }}>{row.refund_id}</td>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>{row.payment_id}</td>
-                        <td style={{ padding: '10px 12px' }}>{row.merchant_id}</td>
-                        <td style={{ padding: '10px 12px', fontWeight: '600' }}>₹{Number(row.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: '600', background: 'rgba(234, 179, 8, 0.15)', color: '#facc15' }}>
-                            {row.status}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>{formatSourceBadge(row.source)}</td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{new Date(row.created_at).toLocaleString()}</td>
+                        <td className="cc-data-mono cc-data-primary">{row.refund_id}</td>
+                        <td className="cc-data-mono">{row.payment_id}</td>
+                        <td>{row.merchant_id}</td>
+                        <td className="cc-numeric cc-data-amount">₹{Number(row.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                        <td><Chip tone="medium">{row.status}</Chip></td>
+                        <td className="cc-data-quiet">{sourceLabel(row.source)}</td>
+                        <td className="text-data cc-data-quiet">{new Date(row.created_at).toLocaleString()}</td>
                       </>
                     )}
 
                     {activeTable === 'webhooks' && (
                       <>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--primary)' }}>{row.event_id || row.external_event_id}</td>
-                        <td style={{ padding: '10px 12px', fontWeight: '600' }}>{row.event_type}</td>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>{row.entity_id || '—'}</td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: '600', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
-                            {row.signature_verified ? '✓ HMAC Verified' : 'Standard'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>{formatSourceBadge(row.source || 'razorpay_webhook')}</td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{new Date(row.received_at).toLocaleString()}</td>
+                        <td className="cc-data-mono cc-data-primary">{row.event_id || row.external_event_id}</td>
+                        <td style={{ fontWeight: 600 }}>{row.event_type}</td>
+                        <td className="cc-data-mono cc-data-quiet">{row.entity_id || '—'}</td>
+                        <td><Chip tone={row.signature_verified ? 'verified' : 'neutral'}>{row.signature_verified ? 'HMAC verified' : 'Standard'}</Chip></td>
+                        <td className="cc-data-quiet">{sourceLabel(row.source || 'razorpay_webhook')}</td>
+                        <td className="text-data cc-data-quiet">{new Date(row.received_at).toLocaleString()}</td>
                       </>
                     )}
                   </tr>
@@ -521,7 +353,7 @@ export default function DataView({ onRefreshAll }) {
             </table>
           </div>
         )}
-      </div>
+      </section>
 
     </div>
   );
