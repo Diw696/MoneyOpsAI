@@ -103,31 +103,43 @@ export default function OverviewView({ stats, sourceStats, incidents, onSelectIn
 
       {/* PAGE CONTEXT */}
       <div className="cc-page-header">
+        <p className="cc-section-eyebrow" style={{ color: 'var(--cc-accent)' }}>Financial Operations</p>
         <h1 className="text-page-title">Overview</h1>
-        <p className="cc-page-desc">What's happening right now, across every connected banking node and merchant channel.</p>
+        <p className="cc-page-desc">What's happening right now across connected banking and merchant channels.</p>
       </div>
 
-      {/* SYSTEM STATE — one quiet strip, not two stacked notices. Instrument
-          chrome (what data this is, whether it's trustworthy), not a
-          marketing alert. */}
-      <div className="cc-system-strip">
-        <Info size={13} strokeWidth={2} className="cc-icon" />
-        <span>Live Razorpay Test Mode + Incident Lab simulation data.</span>
-        {detectionVolume && !detectionVolume.razorpay_test_sufficient_for_detection && (
-          <>
-            <span className="cc-system-strip-sep">·</span>
-            <AlertTriangle size={13} strokeWidth={2} className="cc-icon" style={{ color: 'var(--sev-medium)' }} />
-            <span style={{ color: 'var(--sev-medium)' }}>
-              {detectionVolume.razorpay_test_payment_count} real payment attempt{detectionVolume.razorpay_test_payment_count === 1 ? '' : 's'} — below the {detectionVolume.min_sample_size}+ threshold for reliable detection.
-            </span>
-          </>
-        )}
-        {mostRecentDetectedAt && (
-          <>
-            <span className="cc-system-strip-sep">·</span>
-            <span>Last incident detected {relativeTime(mostRecentDetectedAt)}</span>
-          </>
-        )}
+      {/* SYSTEM STATE — a compact, labeled instrument strip (live system /
+          attention / last detection), not a run-on sentence or a stacked
+          banner. Each field is quiet chrome; only ATTENTION carries color,
+          and only when there's something real to flag. */}
+      <div className="cc-system-panel">
+        <div className="cc-system-field">
+          <p className="cc-system-field-label">Live system</p>
+          <p className="cc-system-field-value">
+            <Info size={12} strokeWidth={2} className="cc-icon" />
+            Razorpay Test Mode + Incident Lab
+          </p>
+        </div>
+        <div className="cc-system-field-divider" />
+        <div className="cc-system-field">
+          <p className="cc-system-field-label">Attention</p>
+          {detectionVolume && !detectionVolume.razorpay_test_sufficient_for_detection ? (
+            <p className="cc-system-field-value" style={{ color: 'var(--sev-medium)' }}>
+              <AlertTriangle size={12} strokeWidth={2} className="cc-icon" />
+              {detectionVolume.razorpay_test_payment_count} payment attempt{detectionVolume.razorpay_test_payment_count === 1 ? '' : 's'} below the {detectionVolume.min_sample_size}+ threshold
+            </p>
+          ) : (
+            <p className="cc-system-field-value" style={{ color: 'var(--state-verified)' }}>
+              <Info size={12} strokeWidth={2} className="cc-icon" />
+              Nothing outstanding
+            </p>
+          )}
+        </div>
+        <div className="cc-system-field-divider" />
+        <div className="cc-system-field">
+          <p className="cc-system-field-label">Last detection</p>
+          <p className="cc-system-field-value">{mostRecentDetectedAt ? relativeTime(mostRecentDetectedAt) : '—'}</p>
+        </div>
       </div>
 
       {/* HERO — one dominant number. Everything else on this page is

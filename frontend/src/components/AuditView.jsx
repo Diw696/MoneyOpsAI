@@ -44,8 +44,10 @@ export default function AuditView() {
           </div>
           <h1 className="text-page-title">Audit Log</h1>
           <p className="cc-page-desc">
-            Permanent, forensic ledger of every AI recommendation, human approval, and safe simulation —
-            immutable in PostgreSQL.
+            Every recommendation, approval, and execution is recorded — permanent, forensic, immutable in PostgreSQL.
+          </p>
+          <p style={{ margin: '10px 0 0', fontSize: '12px', color: 'var(--cc-text-tertiary)', letterSpacing: '0.01em' }}>
+            AI can recommend. Humans approve. Actions are recorded.
           </p>
         </div>
         <Button tier="secondary" onClick={loadLogs} state={loading ? 'loading' : 'idle'} loadingLabel="Loading">

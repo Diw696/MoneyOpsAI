@@ -240,6 +240,20 @@
      vertical scrollbar, which is what triggers the quirk) before this,
      zero after. */
   contain: layout paint;
+  /* Route-aware atmosphere (final polish pass): the same severity-driven
+     glow now also breathes with page context instead of sitting at one
+     flat intensity everywhere — full presence where the story is "risk"
+     (Overview, Investigation), quieter where the page's job is calm,
+     controlled reading (Copilot, Data, Audit). Set by App.jsx via a
+     data-route attribute; #bg-layers lives outside the React tree so this
+     is a plain DOM attribute, not a prop. */
+  opacity: 1;
+  transition: opacity 500ms var(--ease-inout);
+}
+#bg-layers[data-route="copilot"],
+#bg-layers[data-route="data"],
+#bg-layers[data-route="audit"] {
+  opacity: 0.55;
 }
 
 .bg-floor {
@@ -1379,6 +1393,50 @@ body {
 }
 .cc-system-strip-sep { color: var(--line-solid); }
 
+/* System-state panel — three labeled instrument fields, replacing the
+   single run-on strip. Compact, hairline-divided, no card chrome. */
+.cc-system-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 20px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line-hair);
+  border-bottom: 1px solid var(--line-hair);
+}
+.cc-system-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 140px;
+}
+.cc-system-field-label {
+  margin: 0;
+  font-family: var(--cc-font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cc-text-disabled);
+}
+.cc-system-field-value {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--cc-font-ui);
+  font-size: 12.5px;
+  color: var(--cc-text-secondary);
+}
+.cc-system-field-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--line-hair);
+}
+@media (max-width: 640px) {
+  .cc-system-field-divider { display: none; }
+}
+
 /* Hero — the one dominant number on the page. */
 .cc-hero {
   padding-bottom: 28px;
@@ -1558,6 +1616,31 @@ body {
 .cc-data-table tbody tr:hover {
   background: var(--ink-hover);
 }
+/* Suggested questions — restrained text actions, not colorful AI-suggestion
+   chips. Hairline-bordered, quiet by default, accent only on hover/focus. */
+.cc-suggestion-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cc-suggestion-item {
+  font-family: var(--cc-font-ui);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--cc-text-secondary);
+  background: none;
+  border: 1px solid var(--line-hair);
+  border-radius: var(--r-sm);
+  padding: 7px 12px;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.cc-suggestion-item:hover:not(:disabled) {
+  color: var(--cc-accent);
+  border-color: var(--cc-accent);
+}
+.cc-suggestion-item:disabled { opacity: 0.5; cursor: default; }
+
 .cc-data-mono { font-family: var(--cc-font-data); }
 .cc-data-primary { color: var(--cc-accent); }
 .cc-data-quiet { color: var(--cc-text-tertiary); }
@@ -1571,6 +1654,7 @@ body {
   flex-direction: column;
 }
 .cc-evidence-item {
+  position: relative;
   display: flex;
   gap: 18px;
   padding: 16px 0;
@@ -1578,9 +1662,24 @@ body {
 }
 .cc-evidence-item:last-child { border-bottom: none; }
 .cc-evidence-index {
+  position: relative;
   flex-shrink: 0;
+  width: 20px;
   color: var(--cc-text-disabled);
   padding-top: 3px;
+}
+/* An extremely subtle connector — a 1px line dropping from each index down
+   to the next one — so the sequence reads as "these facts led to the
+   conclusion" rather than five disconnected rows. Not a cartoon timeline:
+   no dot, no circle, just a hairline continuing the eye's downward motion. */
+.cc-evidence-item:not(:last-child) .cc-evidence-index::after {
+  content: '';
+  position: absolute;
+  top: 20px;
+  left: 5px;
+  width: 1px;
+  height: calc(100% - 4px);
+  background: var(--line-hair);
 }
 .cc-evidence-label {
   font-family: var(--cc-font-ui);

@@ -545,6 +545,27 @@ export default function FinancialCopilotView({ incidents, onSelectIncident }) {
         <p className="cc-section-eyebrow" style={{ marginBottom: '4px' }}>Investigate</p>
         <h2 className="text-card-title" style={{ margin: '0 0 16px' }}>Ask a question</h2>
 
+        {conversation.length === 0 && (
+          <div style={{ padding: '4px 0 24px' }}>
+            <p style={{ margin: '0 0 14px', fontSize: '13px', color: 'var(--cc-text-tertiary)' }}>
+              Ask something specific — the Copilot reasons over structured PostgreSQL analytics and your uploaded documents together.
+            </p>
+            <div className="cc-suggestion-list">
+              {SUGGESTED_QUESTIONS.map(q => (
+                <button
+                  key={q}
+                  onClick={() => handleAsk(q)}
+                  disabled={asking}
+                  data-cursor="hover"
+                  className="cc-suggestion-item"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {conversation.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '28px', marginBottom: '28px' }}>
             {conversation.map(turn => (
@@ -589,11 +610,21 @@ export default function FinancialCopilotView({ incidents, onSelectIncident }) {
             Ask
           </Button>
         </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
-          {SUGGESTED_QUESTIONS.map(q => (
-            <Chip key={q} interactive onClick={() => !asking && handleAsk(q)} tone="accent">{q}</Chip>
-          ))}
-        </div>
+        {conversation.length > 0 && (
+          <div className="cc-suggestion-list" style={{ marginTop: '12px' }}>
+            {SUGGESTED_QUESTIONS.map(q => (
+              <button
+                key={q}
+                onClick={() => handleAsk(q)}
+                disabled={asking}
+                data-cursor="hover"
+                className="cc-suggestion-item"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* TRANSACTION TABLE (toggled via View Transactions) */}

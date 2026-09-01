@@ -127,6 +127,14 @@ export default function App() {
   // is what actually avoids the muddy magenta midpoint (a simultaneous
   // two-layer crossfade does not; it alpha-blends the same as RGB
   // interpolation would). Total budget stays the brief's 1200ms.
+  // Route-aware atmosphere (final polish pass): #bg-layers lives outside the
+  // React tree (static markup in index.html), so its per-route intensity is
+  // set via a plain DOM attribute rather than a prop — the CSS rule this
+  // drives is in index.css next to the rest of the glow-layer system.
+  useEffect(() => {
+    document.getElementById('bg-layers')?.setAttribute('data-route', activeTab);
+  }, [activeTab]);
+
   const activeGlowLayer = useRef('a');
   useEffect(() => {
     const active = incidents.filter(i => i.status !== 'resolved' && i.status !== 'rejected');
