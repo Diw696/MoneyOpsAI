@@ -98,6 +98,28 @@ This is a real, verified output from the running app — not an illustrative moc
 
 ---
 
+## Current Status
+
+Feature-complete and demo-ready. All five navigated pages (Overview, Data, Investigation,
+Financial Copilot, Audit Log) are finished for this phase — this is a portfolio/internship
+prototype, not a claimed production financial system, and it runs against Razorpay **Test
+Mode** plus a clearly labeled synthetic "Incident Lab" dataset (see "Database tables" further
+down for exactly how those are separated).
+
+Known limitations, stated plainly rather than hidden:
+- Case-memory "similarity" is a composite score (real cosine similarity plus rule-based
+  category/entity/error-code bonuses) over a small seeded set of historical precedents — not a
+  large-scale learned similarity model.
+- RAG retrieval uses real Gemini embeddings but no vector index (`pgvector` isn't installed on
+  the target PostgreSQL) — cosine similarity is computed in Python at query time, which is fine
+  at this data scale.
+- PDF/CSV/XLSX parsing is best-effort (regex for PDFs, column heuristics for spreadsheets); a
+  statement layout that doesn't match yields zero extracted transactions rather than a guess.
+- Governed actions execute as a logged, safe simulation — nothing in this codebase ever mutates
+  a real Razorpay resource.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology | Purpose |
@@ -167,7 +189,6 @@ RzorPayInternProj/
 │   │                FinancialCopilotView, AuditView, Header)
 │   ├── api.js                                # all backend API calls
 │   └── App.jsx                               # tab navigation + top-level state
-├── docs/                                     # deeper technical write-ups
 ├── .env.example
 └── run_project.ps1 / run_project.bat
 ```
