@@ -45,3 +45,7 @@ scratch/
 Thumbs.db
 .vscode/
 .idea/
+
+# Claude Context
+CLAUDE.md
+*.md
