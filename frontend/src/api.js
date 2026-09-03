@@ -160,6 +160,35 @@ export async function fetchIncidentLabRuns(limit = 10) {
   return res.json();
 }
 
+export async function downloadIncidentLabData() {
+  const res = await fetch(`${API_BASE}/incident-lab/export`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to export Incident Lab dataset");
+  }
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "moneyops-financial-data.xlsx";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+export async function ingestIncidentLabToCopilot() {
+  const res = await fetch(`${API_BASE}/incident-lab/ingest-to-copilot`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to ingest Incident Lab dataset into Financial Copilot");
+  }
+  return res.json();
+}
+
 export async function syncRazorpay() {
   const res = await fetch(`${API_BASE}/razorpay/sync`, {
     method: "POST",

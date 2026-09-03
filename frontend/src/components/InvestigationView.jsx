@@ -86,6 +86,10 @@ export default function InvestigationView({ incident, incidents = [], onSelectIn
   const [actionLoading, setActionLoading] = useState(false);
   const [actionMsg, setActionMsg] = useState(null);
 
+  // Completed-list filter — backed by the incident's own real `status` field
+  // ('resolved' vs 'rejected'), never a frontend label heuristic.
+  const [completedFilter, setCompletedFilter] = useState('total');
+
   // Depend on incident_id specifically, not the incident object — App.jsx's 5s
   // polling refresh creates a new object reference for the SAME incident on every
   // tick, and this effect must only reset/reload state on an actual navigation to
@@ -297,10 +301,15 @@ export default function InvestigationView({ incident, incidents = [], onSelectIn
       if (aPending !== bPending) return aPending - bPending;
       return new Date(b.detected_at) - new Date(a.detected_at);
     });
-  const completedList = incidents
+  const completedListAll = incidents
     .filter(i => i.status === 'resolved' || i.status === 'rejected')
     .slice()
     .sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at));
+  const completedList = completedListAll.filter(i => {
+    if (completedFilter === 'approved') return i.status === 'resolved';
+    if (completedFilter === 'rejected') return i.status === 'rejected';
+    return true;
+  });
 
   const workspaceSidebar = (
     <div className="cc-investigation-sidebar" style={{ width: '300px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '22px' }}>
@@ -325,12 +334,30 @@ export default function InvestigationView({ incident, incidents = [], onSelectIn
       </div>
 
       <div>
-        <div className="cc-section-eyebrow" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+        <div className="cc-section-eyebrow" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
           <span>Completed</span>
-          <span>{completedList.length}</span>
+          <span>{completedListAll.length}</span>
         </div>
+        {completedListAll.length > 0 && (
+          <select
+            value={completedFilter}
+            onChange={(e) => setCompletedFilter(e.target.value)}
+            data-cursor="hover"
+            style={{
+              width: '100%', marginBottom: '10px', padding: '6px 8px', borderRadius: 'var(--r-sm)',
+              background: 'var(--ink-raised)', border: '1px solid var(--line-solid)',
+              color: 'var(--cc-text-primary)', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer'
+            }}
+          >
+            <option value="total">Total completed</option>
+            <option value="approved">Human approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        )}
         {completedList.length === 0 ? (
-          <div style={{ fontSize: '12px', color: 'var(--cc-text-tertiary)', padding: '10px 0' }}>No resolved incidents yet.</div>
+          <div style={{ fontSize: '12px', color: 'var(--cc-text-tertiary)', padding: '10px 0' }}>
+            {completedListAll.length === 0 ? 'No resolved incidents yet.' : 'No completed incidents match this filter.'}
+          </div>
         ) : (
           completedList.map(inc => (
             <WorkspaceRow

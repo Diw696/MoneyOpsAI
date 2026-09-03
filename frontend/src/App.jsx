@@ -274,7 +274,12 @@ export default function App() {
           )}
 
           {activeTab === 'data' && (
-            <DataView onRefreshAll={loadData} />
+            <DataView
+              onRefreshAll={loadData}
+              incidents={incidents}
+              onOpenIncident={handleSelectAndInvestigate}
+              onOpenCopilot={() => setActiveTab('copilot')}
+            />
           )}
 
           {activeTab === 'investigation' && (

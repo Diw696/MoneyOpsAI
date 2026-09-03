@@ -223,22 +223,77 @@ class GenerateLabRequest(BaseModel):
     merchants: int = 10
     anomaly: str = "auto"  # "auto" (random each run), "none", or one of SCENARIO_TYPES
 
+# A demo generation is only useful if it reliably surfaces something to
+# investigate. Detection is a global, statistical re-evaluation of the whole
+# accumulated incident_lab + real dataset (not just the batch just generated),
+# so "guarantee 3-7 anomalies" can only be honestly pursued by generating a
+# batch, running the SAME real detector against the now-updated data, and
+# retrying with a fresh random seed/scenario when the result lands outside
+# the target band — never by fabricating incident rows after the fact.
+MIN_TARGET_INCIDENTS = 3
+MAX_TARGET_INCIDENTS = 7
+MAX_GENERATION_ATTEMPTS = 5
+
 @router.post("/incident-lab/generate")
 def generate_incident_lab_data(req: GenerateLabRequest):
     """
-    Generates reproducible financial lifecycle events and routes them through
-    the shared IngestionPipeline with source='incident_lab'.
+    Generates reproducible financial lifecycle events, routes them through the
+    shared IngestionPipeline with source='incident_lab', then runs the real
+    anomaly detector against the resulting dataset so the response already
+    reflects Overview/Investigation's post-detection state (single source of
+    truth — no separate frontend-only detection step required).
+
+    When the caller leaves `anomaly` at its default ("auto"), a batch that
+    yields fewer than MIN_TARGET_INCIDENTS open incidents is retried (fresh
+    random seed, up to MAX_GENERATION_ATTEMPTS total attempts) so a normal
+    "Generate New Data" click reliably produces something demoable. An
+    explicit anomaly type/seed is respected as a single deterministic
+    generation — no retry — so reproducibility for that caller isn't broken.
     """
     try:
         import random as _random
-        seed = req.seed if req.seed is not None else _random.randint(1, 999_999)
-        summary = IncidentLabGenerator.generate_dataset(
-            seed=seed,
-            num_payments=req.payments,
-            num_merchants=req.merchants,
-            anomaly_type=req.anomaly
-        )
-        return summary
+        is_auto = req.anomaly in ("auto", "random")
+        allow_retry = is_auto and req.seed is None
+        max_attempts = MAX_GENERATION_ATTEMPTS if allow_retry else 1
+
+        last_generation = None
+        last_detection = None
+        attempts_made = 0
+        cumulative = {"orders_ingested": 0, "payments_ingested": 0, "refunds_ingested": 0, "webhooks_ingested": 0}
+
+        for attempt in range(1, max_attempts + 1):
+            attempts_made = attempt
+            seed = req.seed if req.seed is not None else _random.randint(1, 999_999)
+            last_generation = IncidentLabGenerator.generate_dataset(
+                seed=seed,
+                num_payments=req.payments,
+                num_merchants=req.merchants,
+                anomaly_type=req.anomaly
+            )
+            for k in cumulative:
+                cumulative[k] += last_generation.get(k, 0)
+
+            last_detection = anomaly_detector.run_detection()
+            incident_count = last_detection.get("anomalies_detected", 0)
+
+            if not allow_retry:
+                break
+            if MIN_TARGET_INCIDENTS <= incident_count <= MAX_TARGET_INCIDENTS:
+                break
+            if incident_count > MAX_TARGET_INCIDENTS:
+                # More data can only add further anomalous entities, never
+                # remove already-open ones — retrying would just overshoot
+                # further, so accept this attempt's result as final.
+                break
+            # else: below the floor — retry with a fresh seed/scenario draw.
+
+        response = dict(last_generation)
+        response.update(cumulative)
+        response["generation_attempts"] = attempts_made
+        response["detection"] = last_detection
+        response["anomalies_detected"] = last_detection.get("anomalies_detected", 0) if last_detection else 0
+        response["incidents"] = last_detection.get("incidents", []) if last_detection else []
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Incident Lab generation failed: {str(e)}")
 
@@ -252,6 +307,146 @@ def list_incident_lab_runs(limit: int = 10):
     c.close()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def _fetch_incident_lab_payments(limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    The single source of truth for 'the currently generated dataset': every
+    payment tagged source='incident_lab', joined with its order/merchant and
+    any refunds — the same rows the Data page's Payments/Refunds tables draw
+    their (cumulative) provenance totals from. Used by both the XLSX export
+    and the Financial Copilot ingestion path so neither can silently drift
+    from what the Data page actually represents.
+
+    `limit`, when given, returns only the most recently INGESTED rows
+    (ingested_at — the real wall-clock insert time, unlike the backdated
+    simulated `created_at`) rather than the full cross-batch history. Incident
+    Lab has no persisted batch/run identifier on individual payment rows, so
+    "most recently ingested N" is the closest honest proxy for "the batch
+    just generated" without inventing one. Used by the Copilot ingestion path
+    (embedding every accumulated batch ever generated is neither a
+    reasonable interpretation of "ingest this dataset" nor fast/affordable);
+    left unset by the full-history XLSX export, which is meant to mirror the
+    Data page's cumulative totals exactly.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+    order = "p.ingested_at DESC" if limit else "p.created_at ASC"
+    limit_clause = "LIMIT %s" if limit else ""
+    params = (limit,) if limit else ()
+    c.execute(f"""
+        SELECT p.payment_id, p.order_id, p.merchant_id, m.name as merchant_name,
+               p.amount, p.currency, p.status, p.method, p.gateway,
+               p.failure_code, p.error_description, p.source, p.created_at,
+               (SELECT COUNT(*) FROM refunds r WHERE r.payment_id = p.payment_id) as refund_count,
+               (SELECT COALESCE(SUM(r.amount), 0) FROM refunds r WHERE r.payment_id = p.payment_id) as refunded_amount
+        FROM payments p
+        LEFT JOIN merchants m ON m.merchant_id = p.merchant_id
+        WHERE p.source = 'incident_lab'
+        ORDER BY {order}
+        {limit_clause};
+    """, params)
+    rows = [dict(r) for r in c.fetchall()]
+    c.close()
+    conn.close()
+    if limit:
+        rows.sort(key=lambda r: r["created_at"])
+    return rows
+
+
+@router.get("/incident-lab/export")
+def export_incident_lab_data():
+    """
+    Downloads the currently generated Incident Lab dataset (source=
+    'incident_lab' payments, the same rows shown on the Data page) as an
+    Excel-compatible .xlsx file — real generated data, never placeholder rows.
+    """
+    import pandas as pd
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+
+    rows = _fetch_incident_lab_payments()
+    if not rows:
+        raise HTTPException(status_code=404, detail="No Incident Lab dataset has been generated yet — click \"Generate new data\" first.")
+
+    df = pd.DataFrame([{
+        "Payment ID": r["payment_id"],
+        "Order ID": r["order_id"],
+        "Merchant ID": r["merchant_id"],
+        "Merchant": r["merchant_name"],
+        "Amount": r["amount"],
+        "Currency": r["currency"],
+        "Status": r["status"],
+        "Method": r["method"],
+        "Gateway": r["gateway"],
+        "Failure Code": r["failure_code"],
+        "Refund Count": r["refund_count"],
+        "Refunded Amount": r["refunded_amount"],
+        # Excel has no timezone-aware datetime type — strip tzinfo (the
+        # underlying value stays in UTC, just without the offset Excel
+        # rejects) rather than silently dropping the column.
+        "Date": r["created_at"].replace(tzinfo=None) if hasattr(r["created_at"], "replace") else r["created_at"],
+    } for r in rows])
+
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Incident Lab Data")
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="moneyops-financial-data.xlsx"'}
+    )
+
+
+# Every row here costs one real Gemini embedding call inside
+# DocumentIngestionPipeline (~20 rows/chunk). Capped to the most recently
+# generated batch (the default "Generate new data" size), not Incident Lab's
+# full cross-session accumulated history — thousands of chunks would make
+# "Ingest into Financial Copilot" take minutes and burn API quota for no
+# demo-relevant benefit, since Copilot questions target "this dataset", not
+# every batch ever generated in this database's lifetime.
+COPILOT_INGEST_ROW_LIMIT = 800
+
+@router.post("/incident-lab/ingest-to-copilot")
+def ingest_incident_lab_to_copilot():
+    """
+    Sends the currently generated Incident Lab dataset into the Financial
+    Copilot without a manual download/re-upload round trip. Builds a CSV of
+    the most recently generated batch of rows (see COPILOT_INGEST_ROW_LIMIT),
+    then routes it through the EXISTING document ingestion pipeline
+    (DocumentIngestionPipeline — the same extract/chunk/embed path a manually
+    uploaded CSV goes through), so Copilot's RAG/SQL tools can answer
+    questions about it exactly as they would for any uploaded document. No
+    separate ingestion system.
+    """
+    import csv
+    from io import StringIO
+
+    rows = _fetch_incident_lab_payments(limit=COPILOT_INGEST_ROW_LIMIT)
+    if not rows:
+        raise HTTPException(status_code=404, detail="No Incident Lab dataset has been generated yet — click \"Generate new data\" first.")
+
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Date", "Description", "Merchant", "Amount", "Reference", "Transaction Type"])
+    for r in rows:
+        is_failed = r["status"] == "failed"
+        desc = f"{r['gateway']} payment via {r['method']}" + (f" — failed ({r['failure_code']})" if is_failed else " — captured")
+        writer.writerow([
+            r["created_at"], desc, r["merchant_name"] or r["merchant_id"],
+            r["amount"], r["payment_id"], "debit" if is_failed else "credit"
+        ])
+    raw_bytes = buf.getvalue().encode("utf-8")
+
+    result = DocumentIngestionPipeline.ingest(
+        filename="incident-lab-dataset.csv",
+        raw_bytes=raw_bytes,
+        document_type="transaction_csv",
+        account_id=None
+    )
+    return result
 
 # =============================================================================
 # ML ANOMALY DETECTION (PHASE B)

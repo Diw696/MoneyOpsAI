@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, Plus } from 'lucide-react';
+import { Zap, Plus, Download, Sparkles } from 'lucide-react';
 import {
   fetchSourceStats,
   syncRazorpay,
@@ -8,8 +8,8 @@ import {
   fetchRefunds,
   fetchWebhooks,
   generateLabData,
-  fetchIncidentLabRuns,
-  triggerAnomalyDetection
+  downloadIncidentLabData,
+  ingestIncidentLabToCopilot
 } from '../api';
 import { Metric, Button, Chip, SegmentedControl } from '../primitives';
 
@@ -36,7 +36,7 @@ function sourceLabel(src) {
   return 'Simulated';
 }
 
-export default function DataView({ onRefreshAll }) {
+export default function DataView({ onRefreshAll, incidents = [], onOpenIncident, onOpenCopilot }) {
   const [sourceStats, setSourceStats] = useState(null);
   const [activeTable, setActiveTable] = useState('payments');
   const [sourceFilter, setSourceFilter] = useState('');
@@ -44,9 +44,11 @@ export default function DataView({ onRefreshAll }) {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
-  const [labRuns, setLabRuns] = useState([]);
   const [generatingLab, setGeneratingLab] = useState(false);
   const [labMsg, setLabMsg] = useState(null);
+  const [downloading, setDownloading] = useState(false);
+  const [ingesting, setIngesting] = useState(false);
+  const [actionMsg, setActionMsg] = useState(null);
 
   const loadProvenance = async () => {
     try {
@@ -57,60 +59,75 @@ export default function DataView({ onRefreshAll }) {
     }
   };
 
-  const loadLabRuns = async () => {
-    try {
-      const runs = await fetchIncidentLabRuns(5);
-      setLabRuns(runs || []);
-    } catch (e) {
-      console.warn("Could not load Incident Lab run history:", e);
-    }
-  };
-
   const handleGenerateLab = async () => {
     setGeneratingLab(true);
     setLabMsg(null);
     try {
+      // Generation now runs the real anomaly scan server-side (as part of the
+      // same request) and retries internally until the dataset yields a
+      // demoable 3-7 open incidents, so the response already reflects the
+      // post-detection state — no separate frontend detection call needed.
       const res = await generateLabData();
-      const ingestLine = `+${res.payments_ingested} payments, +${res.webhooks_ingested} webhooks, +${res.refunds_ingested} refunds ingested (seed ${res.seed}).`;
-
-      // Two-stage message, matching what's actually happening as two separate
-      // steps: ingestion completes first (visible immediately), then the scan
-      // runs against the now-updated dataset and the message is replaced with
-      // its real result — never implying the new records were "already
-      // scanned" before detection actually ran on them.
-      setLabMsg({ type: 'success', text: `${ingestLine} New data available — running anomaly scan…` });
-      await loadLabRuns();
-      await loadProvenance();
-      await loadTableData();
-
-      // A generation batch is not the same thing as an incident — most batches
-      // (per the outcome distribution) inject nothing at all. Running the
-      // (non-AI) anomaly scan against the now-updated dataset is what lets this
-      // button honestly report "produced an incident" instead of guessing from
-      // the injected scenario alone; it does NOT run Gemini and does NOT create
-      // a completed investigation — that stays a separate, human-triggered step.
-      let outcomeLine = '';
-      try {
-        const totalRecords = await fetchSourceStats().then(s =>
-          Object.values(s.payments || {}).reduce((a, b) => a + b, 0)
-        ).catch(() => null);
-        const det = await triggerAnomalyDetection();
-        const newOnes = (det.incidents || []).filter(i => i.incident_id);
-        const recordsPhrase = totalRecords ? ` across ${totalRecords.toLocaleString('en-IN')} records` : '';
-        outcomeLine = newOnes.length > 0
-          ? `Detection scan complete — ${newOnes.length} anomal${newOnes.length === 1 ? 'y' : 'ies'} detected${recordsPhrase} (${newOnes.map(i => i.incident_id).join(', ')}).`
-          : `Detection scan complete — no significant anomaly found${recordsPhrase}.`;
-      } catch (e) {
-        outcomeLine = 'Detection scan could not run after generation — use "Run Anomaly Scan" on Overview.';
-      }
+      const ingestLine = `+${res.payments_ingested} payments, +${res.webhooks_ingested} webhooks, +${res.refunds_ingested} refunds ingested.`;
+      const count = res.anomalies_detected || 0;
+      const outcomeLine = count > 0
+        ? `Detection scan complete — ${count} active anomal${count === 1 ? 'y' : 'ies'} (${(res.incidents || []).map(i => i.incident_id).join(', ')}).`
+        : 'Detection scan complete — no significant anomaly found.';
 
       setLabMsg({ type: 'success', text: `${ingestLine} ${outcomeLine}` });
+      await loadProvenance();
+      await loadTableData();
       if (onRefreshAll) onRefreshAll();
     } catch (e) {
       setLabMsg({ type: 'error', text: `Generation failed: ${e.message}` });
     } finally {
       setGeneratingLab(false);
     }
+  };
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    setActionMsg(null);
+    try {
+      await downloadIncidentLabData();
+    } catch (e) {
+      setActionMsg({ type: 'error', text: e.message });
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const handleIngestToCopilot = async () => {
+    setIngesting(true);
+    setActionMsg(null);
+    try {
+      const res = await ingestIncidentLabToCopilot();
+      if (res.processing_status === 'failed') {
+        setActionMsg({ type: 'error', text: `Ingestion failed: ${res.error_message || 'Unknown error'}` });
+      } else {
+        setActionMsg({ type: 'success', text: `Sent to Financial Copilot — ${res.transactions_extracted} transactions indexed. Opening Copilot…` });
+        if (onOpenCopilot) onOpenCopilot();
+      }
+    } catch (e) {
+      setActionMsg({ type: 'error', text: e.message });
+    } finally {
+      setIngesting(false);
+    }
+  };
+
+  // Best-effort, ID-based (never string/name matching) link from a row to the
+  // open incident it's evidence for: a failed payment maps to that gateway's
+  // open failure-spike incident; a refund maps to its merchant's open
+  // refund-spike/duplicate-refund incident. Ordinary, non-anomalous rows
+  // never match anything here, so they stay non-interactive.
+  const matchIncidentForRow = (table, row) => {
+    if (table === 'payments' && row.status === 'failed' && row.gateway) {
+      return incidents.find(i => i.status === 'open' && i.target_entity_type === 'gateway' && i.target_entity_id === row.gateway) || null;
+    }
+    if (table === 'refunds' && row.merchant_id) {
+      return incidents.find(i => i.status === 'open' && i.target_entity_type === 'merchant' && i.target_entity_id === row.merchant_id) || null;
+    }
+    return null;
   };
 
   const loadTableData = async () => {
@@ -133,7 +150,6 @@ export default function DataView({ onRefreshAll }) {
 
   useEffect(() => {
     loadProvenance();
-    loadLabRuns();
   }, []);
 
   useEffect(() => {
@@ -229,10 +245,20 @@ export default function DataView({ onRefreshAll }) {
         <div className="cc-provenance-panel cc-provenance-simulated">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <p className="cc-section-eyebrow" style={{ margin: 0 }}>Simulated — Incident Lab</p>
-            <Button tier="ghost" onClick={handleGenerateLab} state={generatingLab ? 'loading' : 'idle'} loadingLabel="Generating">
-              <Plus size={12} strokeWidth={2} style={{ marginRight: 4 }} />
-              Generate new data
-            </Button>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <Button tier="ghost" onClick={handleDownload} state={downloading ? 'loading' : 'idle'} loadingLabel="Preparing">
+                <Download size={12} strokeWidth={2} style={{ marginRight: 4 }} />
+                Download data
+              </Button>
+              <Button tier="ghost" onClick={handleIngestToCopilot} state={ingesting ? 'loading' : 'idle'} loadingLabel="Sending">
+                <Sparkles size={12} strokeWidth={2} style={{ marginRight: 4 }} />
+                Ingest into Financial Copilot
+              </Button>
+              <Button tier="ghost" onClick={handleGenerateLab} state={generatingLab ? 'loading' : 'idle'} loadingLabel="Generating">
+                <Plus size={12} strokeWidth={2} style={{ marginRight: 4 }} />
+                Generate new data
+              </Button>
+            </div>
           </div>
           <div className="cc-provenance-metrics">
             <Metric size="sm" label="Orders" value={labOrders} />
@@ -245,17 +271,10 @@ export default function DataView({ onRefreshAll }) {
               {labMsg.text}
             </p>
           )}
-          {labRuns.length > 0 && (
-            <div style={{ marginTop: '10px' }}>
-              {labRuns.map((r) => (
-                <div key={r.run_id} className="text-data" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <span style={{ color: 'var(--cc-text-secondary)' }}>seed={r.seed}</span>
-                  <span>{r.anomaly_type}</span>
-                  {r.target_entity_id && <span>→ {r.target_entity_id}</span>}
-                  <span>({r.anomalous_events_count} anomalous)</span>
-                </div>
-              ))}
-            </div>
+          {actionMsg && (
+            <p className="cc-provenance-note" style={{ color: actionMsg.type === 'success' ? 'var(--state-verified)' : 'var(--sev-critical)' }}>
+              {actionMsg.text}
+            </p>
           )}
         </div>
       </div>
@@ -299,8 +318,17 @@ export default function DataView({ onRefreshAll }) {
                 </tr>
               </thead>
               <tbody>
-                {tableData.map((row, idx) => (
-                  <tr key={idx}>
+                {tableData.map((row, idx) => {
+                  const matchedIncident = matchIncidentForRow(activeTable, row);
+                  return (
+                  <tr
+                    key={idx}
+                    onClick={matchedIncident ? () => onOpenIncident && onOpenIncident(matchedIncident) : undefined}
+                    data-cursor={matchedIncident ? 'hover' : undefined}
+                    title={matchedIncident ? `Open ${matchedIncident.incident_id} — ${matchedIncident.title}` : undefined}
+                    style={matchedIncident ? { cursor: 'pointer' } : undefined}
+                    className={matchedIncident ? 'cc-data-row-anomalous' : undefined}
+                  >
                     {activeTable === 'payments' && (
                       <>
                         <td className="cc-data-mono cc-data-primary">{row.payment_id}</td>
@@ -348,7 +376,8 @@ export default function DataView({ onRefreshAll }) {
                       </>
                     )}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -1616,6 +1616,13 @@ body {
 .cc-data-table tbody tr:hover {
   background: var(--ink-hover);
 }
+/* A row that links to an open incident (Data -> Investigation navigation) —
+   a quiet accent rail on the left edge, same signal language SeverityRail
+   already uses elsewhere, so "this is investigable" reads as consistent
+   with the rest of the system rather than a one-off affordance. */
+.cc-data-row-anomalous td:first-child {
+  box-shadow: inset 3px 0 0 var(--sev-critical);
+}
 /* Suggested questions — restrained text actions, not colorful AI-suggestion
    chips. Hairline-bordered, quiet by default, accent only on hover/focus. */
 .cc-suggestion-list {

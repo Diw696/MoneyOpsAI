@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { animate } from 'framer-motion';
-import { Info, AlertTriangle, RefreshCw, CheckCircle2, ChevronRight } from 'lucide-react';
+import { Info, AlertTriangle, RefreshCw, CheckCircle2, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, Metric, Button } from '../primitives';
 import { usePrefersReducedMotion } from '../hooks/useMotionGuards';
 
@@ -68,6 +68,9 @@ const relativeTime = (isoStr) => {
 
 export default function OverviewView({ stats, sourceStats, incidents, onSelectIncident, onTriggerDetection, isDetecting }) {
   const prefersReducedMotion = usePrefersReducedMotion();
+  // Collapsed by default — Case Memory is quiet history, not part of what a
+  // reviewer needs to see to understand what's currently active.
+  const [caseMemoryOpen, setCaseMemoryOpen] = useState(false);
 
   // Pending-investigation incidents surface first — a reviewer scanning this list
   // should see what still needs attention before what's already been handled,
@@ -294,28 +297,49 @@ export default function OverviewView({ stats, sourceStats, incidents, onSelectIn
         )}
       </section>
 
-      {/* HISTORY — quiet case memory, not a second incident section. */}
+      {/* HISTORY — quiet case memory, not a second incident section. Collapsed
+          by default so a long resolved history doesn't push Overview's
+          actionable content below the fold; the eyebrow itself is the
+          toggle, matching the rest of the app's restrained interaction style. */}
       {resolvedIncidents.length > 0 && (
         <section>
-          <p className="cc-section-eyebrow" style={{ marginBottom: '10px' }}>
-            Case memory — {resolvedIncidents.length} resolved historically
-          </p>
-          <div className="cc-row-list">
-            {resolvedIncidents.map((inc) => {
-              const isRejected = inc.status === 'rejected';
-              return (
-                <div key={inc.incident_id} className="cc-row cc-row-quiet">
-                  <div className="cc-row-main">
-                    <span style={{ color: isRejected ? 'var(--cc-text-disabled)' : 'var(--state-verified)', fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
-                      {isRejected ? 'Rejected' : 'Resolved'}
-                    </span>
-                    <span className="cc-row-title" style={{ color: 'var(--cc-text-secondary)' }}>{inc.title}</span>
+          <button
+            onClick={() => setCaseMemoryOpen(v => !v)}
+            data-cursor="hover"
+            style={{
+              display: 'flex', alignItems: 'center', gap: '6px', width: '100%',
+              background: 'none', border: 'none', padding: 0, marginBottom: caseMemoryOpen ? '10px' : 0,
+              cursor: 'pointer', textAlign: 'left'
+            }}
+            aria-expanded={caseMemoryOpen}
+          >
+            <p className="cc-section-eyebrow" style={{ margin: 0, flex: 1 }}>
+              Case memory — {resolvedIncidents.length} resolved historically
+            </p>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11.5px', fontWeight: 600, color: 'var(--cc-accent)' }}>
+              {caseMemoryOpen ? 'Collapse' : 'Expand'}
+              {caseMemoryOpen ? <ChevronUp size={13} strokeWidth={2} /> : <ChevronDown size={13} strokeWidth={2} />}
+            </span>
+          </button>
+
+          {caseMemoryOpen && (
+            <div className="cc-row-list">
+              {resolvedIncidents.map((inc) => {
+                const isRejected = inc.status === 'rejected';
+                return (
+                  <div key={inc.incident_id} className="cc-row cc-row-quiet">
+                    <div className="cc-row-main">
+                      <span style={{ color: isRejected ? 'var(--cc-text-disabled)' : 'var(--state-verified)', fontSize: '11px', fontWeight: 600, flexShrink: 0 }}>
+                        {isRejected ? 'Rejected' : 'Resolved'}
+                      </span>
+                      <span className="cc-row-title" style={{ color: 'var(--cc-text-secondary)' }}>{inc.title}</span>
+                    </div>
+                    <span className="cc-row-meta">{inc.incident_id}</span>
                   </div>
-                  <span className="cc-row-meta">{inc.incident_id}</span>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </section>
       )}
 
